@@ -31,6 +31,7 @@ const state = {
   javas: [],
   settings: {},
   playit: { supported: false, linked: false, agent: "stopped" },
+  sys: null, // latest host resource sample (see sysmon.js)
   servers: new Map(), // id -> summary
   route: { name: "dashboard", id: null },
   consoleES: null, // EventSource for the open server console
@@ -48,14 +49,16 @@ function esc(s) {
 function fmtUptime(ms) {
   if (!ms) return "—";
   const s = Math.floor(ms / 1000);
+  const d = Math.floor(s / 86400);
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+  if (d) return `${d}d ${h % 24}h`;
   return h ? `${h}h ${m}m` : m ? `${m}m ${sec}s` : `${sec}s`;
 }
 function fmtMem(mb) { return mb >= 1024 ? (mb / 1024).toFixed(1) + " GB" : mb + " MB"; }
 function fmtBytes(b) {
   if (b < 1024) return b + " B";
-  const u = ["KB", "MB", "GB"]; let i = -1;
-  do { b /= 1024; i++; } while (b >= 1024 && i < 2);
+  const u = ["KB", "MB", "GB", "TB"]; let i = -1;
+  do { b /= 1024; i++; } while (b >= 1024 && i < 3);
   return b.toFixed(b < 10 ? 1 : 0) + " " + u[i];
 }
 const STATUS_LABEL = {
@@ -113,12 +116,14 @@ async function boot() {
     state.javas = b.javas;
     state.settings = b.settings;
     state.playit = b.playit || state.playit;
+    state.sys = b.sys || null;
     b.servers.forEach((s) => state.servers.set(s.id, s));
   } catch (e) {
     view.innerHTML = `<div class="page"><div class="banner err">Failed to reach the backend: ${esc(e.message)}</div></div>`;
     return;
   }
   renderSidebar();
+  initSysmon();
   openGlobalStream();
   window.addEventListener("hashchange", route);
   route();
@@ -139,6 +144,13 @@ function openGlobalStream() {
 
 async function handleGlobalEvent(e) {
   if (e.type === "ping") return;
+  // Resource samples arrive every couple of seconds — patch the meters in
+  // place instead of falling through to a full sidebar/dashboard re-render.
+  if (e.type === "sysmon") {
+    state.sys = e.sys;
+    paintSysmon();
+    return;
+  }
   if (e.type === "playit") {
     state.playit = e.playit;
     renderSidebar();
@@ -226,6 +238,162 @@ function renderSidebar() {
 }
 const cap = (s) => (s ? s[0].toUpperCase() + s.slice(1) : "");
 
+/* ----------------------------------------------------------- system monitor */
+/* Host CPU / RAM / disk at a glance. lib/sysmon.js samples every couple of
+ * seconds and pushes a `sysmon` event down the global stream; we patch the
+ * existing nodes in place so the bars glide instead of flickering. The same
+ * metric shape feeds the compact sidebar strip and the dashboard card. */
+
+const SYS_KEYS = ["cpu", "mem", "disk"];
+const SPARK_N = 90; // history length the backend keeps
+const SPARK_W = 300, SPARK_H = 52;
+
+const gb = (mb) => (mb / 1024).toFixed(1);
+const meterState = (pct) => (pct >= 90 ? "hot" : pct >= 75 ? "warn" : "");
+
+function sysMetrics() {
+  const sys = state.sys;
+  if (!sys) return null;
+  return {
+    cpu: {
+      label: "CPU", pct: sys.cpu.pct, num: Math.round(sys.cpu.pct) + "%",
+      sub: `${sys.host.cores} threads · ${(sys.host.speedMHz / 1000).toFixed(1)} GHz`,
+    },
+    mem: {
+      label: "RAM", pct: sys.mem.pct, num: Math.round(sys.mem.pct) + "%",
+      sub: `${gb(sys.mem.usedMB)} / ${gb(sys.mem.totalMB)} GB used`,
+    },
+    disk: sys.disk
+      ? {
+          label: "Disk", pct: sys.disk.pct, num: Math.round(sys.disk.pct) + "%",
+          sub: `${fmtBytes(sys.disk.free)} free on ${sys.disk.drive}`,
+        }
+      : { label: "Disk", pct: 0, num: "—", sub: "unavailable" },
+  };
+}
+
+// Shared markup for one meter: label + number on top, bar, detail underneath.
+function meterHTML(idPrefix, k, cls) {
+  return `<div class="${cls}" id="${idPrefix}-${k}">
+      <div class="mtop"><span class="mlabel"></span><b class="mnum">—</b></div>
+      <div class="mbar"><i></i></div>
+      <div class="msub"></div>
+    </div>`;
+}
+
+function initSysmon() {
+  const box = $("#sysmon");
+  if (!box) return;
+  box.innerHTML = `<div class="sys-mini-label">System</div>` +
+    SYS_KEYS.map((k) => meterHTML("sm", k, "meter")).join("");
+  paintSysmon();
+}
+
+function sysCardHTML() {
+  if (!state.sys) return "";
+  const h = state.sys.host;
+  return `
+    <div class="card sys-card">
+      <div class="sys-head">
+        <div>
+          <h3>System resources</h3>
+          <p>${esc(h.model)} · ${h.cores} threads · ${esc(h.platform === "win32" ? "Windows" : h.platform)} · up ${fmtUptime(state.sys.uptime * 1000)}</p>
+        </div>
+        <div class="sys-legend"><span class="lg cpu">CPU</span><span class="lg mem">RAM</span></div>
+      </div>
+      <div class="sys-meters">${SYS_KEYS.map((k) => meterHTML("sc", k, "sys-meter")).join("")}</div>
+      <div class="sys-graph">
+        <svg id="sys-spark" class="spark" viewBox="0 0 ${SPARK_W} ${SPARK_H}" preserveAspectRatio="none" aria-hidden="true">
+          <polygon class="sp-fill" points="" />
+          <polyline class="sp-cpu" points="" />
+          <polyline class="sp-mem" points="" />
+        </svg>
+        <div class="sys-cores" id="sys-cores" title="Load per CPU thread"></div>
+      </div>
+      <div class="sys-foot" id="sys-foot"></div>
+    </div>`;
+}
+
+function paintMeter(el, d) {
+  if (!el) return;
+  const set = (sel, txt) => { const n = $(sel, el); if (n) n.textContent = txt; };
+  set(".mlabel", d.label);
+  set(".mnum", d.num);
+  set(".msub", d.sub);
+  const bar = $(".mbar > i", el);
+  if (bar) bar.style.width = d.pct + "%";
+  el.classList.toggle("warn", meterState(d.pct) === "warn");
+  el.classList.toggle("hot", meterState(d.pct) === "hot");
+}
+
+function paintSysmon() {
+  const m = sysMetrics();
+  if (!m) return;
+  for (const k of SYS_KEYS) {
+    paintMeter($("#sm-" + k), m[k]);
+    paintMeter($("#sc-" + k), m[k]);
+  }
+  const box = $("#sysmon");
+  if (box) box.title = `CPU ${m.cpu.num} · RAM ${m.mem.sub} · Disk ${m.disk.sub}`;
+  paintSysGraph();
+}
+
+// Newest sample sits at the right edge, so the trace scrolls in like Task
+// Manager's rather than stretching while the buffer fills.
+function sparkPts(arr) {
+  const step = SPARK_W / (SPARK_N - 1);
+  return arr.map((v, i) => {
+    const x = SPARK_W - (arr.length - 1 - i) * step;
+    return `${x.toFixed(1)},${(SPARK_H - (v / 100) * SPARK_H).toFixed(1)}`;
+  });
+}
+
+function paintSysGraph() {
+  const sys = state.sys;
+  if (!sys) return;
+
+  const spark = $("#sys-spark");
+  if (spark) {
+    const cpu = sparkPts(sys.history.cpu);
+    const mem = sparkPts(sys.history.mem);
+    const baseline = cpu.length
+      ? `${cpu[0].split(",")[0]},${SPARK_H} ${cpu.join(" ")} ${cpu[cpu.length - 1].split(",")[0]},${SPARK_H}`
+      : "";
+    $(".sp-fill", spark).setAttribute("points", baseline);
+    $(".sp-cpu", spark).setAttribute("points", cpu.join(" "));
+    $(".sp-mem", spark).setAttribute("points", mem.join(" "));
+  }
+
+  const cores = $("#sys-cores");
+  if (cores) {
+    if (cores.children.length !== sys.cpu.cores.length)
+      cores.innerHTML = sys.cpu.cores.map(() => `<span class="core"><i></i></span>`).join("");
+    sys.cpu.cores.forEach((p, i) => {
+      const bar = cores.children[i].firstElementChild;
+      bar.style.height = Math.max(4, p) + "%";
+      bar.className = meterState(p);
+    });
+  }
+
+  const foot = $("#sys-foot");
+  if (foot) foot.innerHTML = allocHTML();
+}
+
+// What the panel itself has promised the JVMs, versus what the box actually
+// has — over-committing RAM across servers is the classic way to swap-thrash.
+function allocHTML() {
+  const servers = [...state.servers.values()];
+  const running = servers.filter((s) => s.status === "running");
+  const allocMB = running.reduce((n, s) => n + (Number(s.memory) || 0), 0);
+  const totalMB = state.sys ? state.sys.mem.totalMB : 0;
+  if (!running.length)
+    return `<span class="muted">No servers running · ${servers.length} configured</span>`;
+  const over = totalMB && allocMB > totalMB * 0.8;
+  return `<span class="muted">${running.length} server${running.length === 1 ? "" : "s"} running ·
+      <b>${gb(allocMB)} GB</b> of ${gb(totalMB)} GB allocated to Minecraft</span>
+    ${over ? `<span class="over">⚠ over-committed</span>` : ""}`;
+}
+
 /* ---------------------------------------------------------------- dashboard */
 function renderDashboard() {
   const servers = [...state.servers.values()].sort((a, b) => a.name.localeCompare(b.name));
@@ -240,9 +408,11 @@ function renderDashboard() {
         </div>
         <button class="btn btn-primary" id="dash-create"><span class="ic">＋</span> Create Server</button>
       </div>
+      ${sysCardHTML()}
       ${servers.length ? `<div class="grid">${servers.map(cardHTML).join("")}</div>` : emptyHTML()}
     </div>`;
 
+  paintSysmon();
   $("#dash-create").onclick = openCreateWizard;
   if (!servers.length) $("#empty-create") && ($("#empty-create").onclick = openCreateWizard);
   $$(".srv-card").forEach((el) => {

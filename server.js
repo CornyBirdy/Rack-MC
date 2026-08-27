@@ -16,6 +16,7 @@ const loaders = require("./lib/loaders");
 const manager = require("./lib/manager");
 const java = require("./lib/java");
 const playit = require("./lib/playit");
+const sysmon = require("./lib/sysmon");
 
 // Port precedence: explicit flag, then the launcher's MC_PORT (our portEnv),
 // then whatever Rack/the old controller assigned, then the standalone default.
@@ -111,28 +112,37 @@ function sseSend(res, obj) {
 }
 
 // Common plumbing for an SSE endpoint: subscribes `onEvent` to the manager,
-// heartbeats, and tears everything down exactly once on close/error.
-function sseChannel(res, onEvent) {
+// heartbeats, and tears everything down exactly once on close/error. `extra`
+// takes [emitter, event, handler] triples for channels that also want to relay
+// something other than the manager's bus (the system monitor, for instance).
+function sseChannel(res, onEvent, extra = []) {
   sseOpen(res);
-  manager.events.on("event", onEvent);
+  const subs = [[manager.events, "event", onEvent], ...extra];
+  for (const [emitter, name, fn] of subs) emitter.on(name, fn);
   const ping = setInterval(() => sseSend(res, { type: "ping" }), 20000);
   let closed = false;
   const cleanup = () => {
     if (closed) return;
     closed = true;
     clearInterval(ping);
-    manager.events.off("event", onEvent);
+    for (const [emitter, name, fn] of subs) emitter.off(name, fn);
   };
   res.on("close", cleanup);
   res.on("error", cleanup);
 }
 
 // Global event stream — everything except raw console lines (those get their
-// own per-server channel so the dashboard isn't flooded).
+// own per-server channel so the dashboard isn't flooded). Host resource samples
+// ride along here too, so the sidebar meters tick without polling.
 function attachGlobalStream(res) {
-  sseChannel(res, (e) => {
-    if (e.type !== "console") sseSend(res, e);
-  });
+  sseChannel(
+    res,
+    (e) => {
+      if (e.type !== "console") sseSend(res, e);
+    },
+    [[sysmon.events, "sample", (sys) => sseSend(res, { type: "sysmon", sys })]]
+  );
+  sseSend(res, { type: "sysmon", sys: sysmon.snapshot() });
 }
 
 // Per-server console stream — replays the recent buffer, then live lines +
@@ -169,9 +179,14 @@ const server = http.createServer(async (req, res) => {
         settings: store.getSettings(),
         javas,
         playit: playit.snapshot(),
+        sys: sysmon.snapshot(),
         servers: manager.listSummaries(),
       });
     }
+
+    // ---- host resources ----
+    if (p === "/api/sysmon" && req.method === "GET")
+      return sendJSON(res, 200, { sys: sysmon.snapshot() });
 
     if (p === "/api/loaders" && req.method === "GET")
       return sendJSON(res, 200, { loaders: loaders.list() });

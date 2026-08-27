@@ -135,6 +135,22 @@ Details worth knowing:
 - **Settings** — rename, change RAM/port/max-players, custom JVM args (Aikar's
   flags), Java override, the **public address** switch, or delete the server.
 
+## System monitor
+
+The sidebar carries a permanent CPU / RAM / disk strip — a bar plus a number
+for each, so the health of the whole machine is visible from any screen. The
+dashboard expands the same three meters into a card with a rolling ~3-minute
+CPU + RAM sparkline, a per-thread load strip, and a line comparing the RAM
+you've handed to running servers against what the box actually has (it warns
+once you're past 80% — over-committing is what turns a full modpack into a
+swap-thrash).
+
+Bars turn amber past 75% and red past 90%. Sampling is `lib/sysmon.js`: pure
+Node built-ins on a 2-second timer — `os.cpus()` tick deltas, `os.freemem()`,
+and `fs.statfs()` on the data drive every ~30s. No `wmic`, no PowerShell, no
+child processes, so watching the meters costs a running server nothing. Samples
+ride the SSE stream the panel already keeps open; there is no polling.
+
 ## Where things live
 
 ```
@@ -146,6 +162,7 @@ MC_hoster/
 │  ├─ loaders.js        per-loader version lists + install logic
 │  ├─ playit.js         playit.gg agent, account link, per-server tunnels
 │  ├─ manager.js        server lifecycle, console, players, stats
+│  ├─ sysmon.js         host CPU / RAM / disk sampling for the meters
 │  └─ store.js          persistence
 ├─ public/              the panel UI (index.html / style.css / app.js)
 ├─ data/                created at runtime — git-ignored, never travels
