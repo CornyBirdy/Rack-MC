@@ -1,0 +1,14 @@
+{
+  "name": "MC Hoster",
+  "setup": "run.bat  (just double-click it once to try standalone; no build step)",
+  "processes": [
+    {
+      "name": "MC Hoster",
+      "command": "run.bat",
+      "port": 8100,
+      "portEnv": "MC_PORT",
+      "managed": false,
+      "links": [{ "label": "Open panel", "path": "/" }]
+    }
+  ]
+}

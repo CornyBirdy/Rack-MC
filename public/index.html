@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MC Hoster — Minecraft Server Panel</title>
+    <link rel="stylesheet" href="/style.css" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%9F%A9%3C/text%3E%3C/svg%3E"
+    />
+  </head>
+  <body>
+    <div id="app">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">⛏️</div>
+          <div class="brand-text">
+            <strong>MC&nbsp;Hoster</strong>
+            <span>server control panel</span>
+          </div>
+        </div>
+
+        <button class="btn btn-primary btn-block" id="nav-create">
+          <span class="ic">＋</span> Create Server
+        </button>
+
+        <nav class="nav">
+          <a href="#/" class="nav-item" data-route="dashboard"><span class="ic">▦</span> Dashboard</a>
+        </nav>
+
+        <div class="server-list-label">Your Servers</div>
+        <div class="server-list" id="server-list"></div>
+
+        <div class="sidebar-foot">
+          <button class="nav-item" id="nav-settings"><span class="ic">⚙</span> Settings</button>
+          <div class="java-chip" id="java-chip" title="Java runtime status"></div>
+        </div>
+      </aside>
+
+      <main class="main">
+        <div id="view"></div>
+      </main>
+    </div>
+
+    <div id="modal-root"></div>
+    <div id="toast-root"></div>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

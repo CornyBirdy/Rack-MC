@@ -1,0 +1,15 @@
+# Machine-specific state — never travels with the code.
+node_modules/
+
+# Everything the panel creates at runtime: server definitions, worlds, jars,
+# mods, settings and any Java runtimes it downloads.
+data/
+
+# Local env overrides
+.env
+.env.*
+
+# Editor / tooling scratch
+*.log
+.DS_Store
+.claude/settings.local.json

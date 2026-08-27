@@ -1,0 +1,21 @@
+{
+  "name": "MC Hoster",
+  "category": "Games",
+  "autostart": false,
+  "setup": "setup.bat",
+  "update": "git pull",
+  "rebuild": false,
+  "processes": [
+    {
+      "name": "Panel",
+      "command": "run.bat",
+      "args": "",
+      "dir": ".",
+      "port": 8100,
+      "portEnv": "MC_PORT",
+      "managed": false,
+      "stop": "",
+      "links": [{ "label": "Open panel", "path": "/" }]
+    }
+  ]
+}
