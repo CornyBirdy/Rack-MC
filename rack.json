@@ -9,12 +9,9 @@
     {
       "name": "Panel",
       "command": "run.bat",
-      "args": "",
-      "dir": ".",
       "port": 8100,
       "portEnv": "MC_PORT",
       "managed": false,
-      "stop": "",
       "links": [{ "label": "Open panel", "path": "/" }]
     }
   ]
