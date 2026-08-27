@@ -15,6 +15,7 @@ const store = require("./lib/store");
 const loaders = require("./lib/loaders");
 const manager = require("./lib/manager");
 const java = require("./lib/java");
+const playit = require("./lib/playit");
 
 // Port precedence: explicit flag, then the launcher's MC_PORT (our portEnv),
 // then whatever Rack/the old controller assigned, then the standalone default.
@@ -167,6 +168,7 @@ const server = http.createServer(async (req, res) => {
         loaders: loaders.list(),
         settings: store.getSettings(),
         javas,
+        playit: playit.snapshot(),
         servers: manager.listSummaries(),
       });
     }
@@ -217,6 +219,31 @@ const server = http.createServer(async (req, res) => {
         sendJSON(res, 200, { java: info, javas });
       })(req, res);
 
+    // ---- playit.gg tunnels ----
+    // Public addresses for servers on machines that can't port-forward. The
+    // agent binary, the account link and the per-server tunnels all live in
+    // lib/playit.js; these routes are a thin shell over it.
+    if (p === "/api/playit" && req.method === "GET")
+      return sendJSON(res, 200, { playit: playit.snapshot(), log: playit.logLines() });
+
+    if (p === "/api/playit/install" && req.method === "POST")
+      return guard(async () => {
+        await playit.install();
+        sendJSON(res, 200, { playit: playit.snapshot() });
+      })(req, res);
+
+    if (p === "/api/playit/link" && req.method === "POST")
+      return guard(async () => sendJSON(res, 200, { playit: await playit.startLink() }))(req, res);
+
+    if (p === "/api/playit/link/cancel" && req.method === "POST")
+      return sendJSON(res, 200, { playit: playit.cancelLink() });
+
+    if (p === "/api/playit/unlink" && req.method === "POST")
+      return sendJSON(res, 200, { playit: playit.unlink() });
+
+    if (p === "/api/playit/refresh" && req.method === "POST")
+      return guard(async () => sendJSON(res, 200, { playit: await playit.refresh() }))(req, res);
+
     // ---- settings ----
     if (p === "/api/settings" && req.method === "GET")
       return sendJSON(res, 200, store.getSettings());
@@ -263,6 +290,9 @@ const server = http.createServer(async (req, res) => {
         for (const k of ["name", "memory", "port", "maxPlayers", "javaPath", "jvmArgs", "icon"])
           if (k in body) patch[k] = body[k];
         store.update(id, patch);
+        // The playit tunnel points at a fixed local port, so a port change has
+        // to be pushed to the running agent.
+        if ("port" in patch) playit.sync();
         manager.events.emit("event", { type: "status", ...manager.summary(id) });
         return sendJSON(res, 200, { server: manager.summary(id) });
       }
@@ -279,6 +309,14 @@ const server = http.createServer(async (req, res) => {
         const body = await readJSONBody(req);
         return sendJSON(res, 200, manager.sendCommand(id, String(body.cmd || "")));
       }
+      if (action === "playit" && req.method === "POST")
+        return guard(async () => {
+          const body = await readJSONBody(req);
+          const info = await playit.setEnabled(id, !!body.enabled);
+          manager.events.emit("event", { type: "status", ...manager.summary(id) });
+          sendJSON(res, 200, { playit: info, server: manager.summary(id) });
+        })(req, res);
+
       if (action === "eula" && req.method === "POST") {
         const body = await readJSONBody(req);
         return sendJSON(res, 200, { eula: manager.setEula(id, !!body.accepted) });
@@ -372,6 +410,7 @@ function isWin() {
 
 /* --------------------------------------------------------- graceful shutdown */
 function shutdown() {
+  playit.stopAgent();
   for (const s of store.all()) {
     const rtSlot = manager.slot(s.id);
     if (rtSlot.proc) manager.stop(s.id, { force: true });

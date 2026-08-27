@@ -76,6 +76,41 @@ you which Java a version needs before you build the server, and **Settings** can
 fetch any major on demand. You can still override the Java path globally or per
 server.
 
+## Play with friends — playit.gg tunnels
+
+Most home networks won't let anyone in: CGNAT, a router you can't touch, or a
+port-forward you'd rather not open. MC Hoster can hand a server a **public
+address** instead, using [playit.gg](https://playit.gg) — a free relay where an
+agent on this machine holds an outbound connection and playit forwards a domain
+to your local port.
+
+1. **Settings → Public access · playit.gg → Connect playit.gg.** The panel
+   downloads the official agent (pinned to `v0.15.26`, ~5 MB) into
+   `data/playit/` and shows a `playit.gg/claim/…` link.
+2. Open the link, sign in (a free account is enough) and approve the agent. The
+   panel notices and stores the key in `data/playit/playit.toml`.
+3. On any server, **Settings → Public address → toggle it on.** That creates a
+   Minecraft tunnel on your account and points it at that server's port.
+
+The address (something like `crispy-fox.gl.at.ply.gg`) then shows up on the
+server's card, its header, and in Settings — click it to copy. Minecraft Java
+tunnels come with an SRV record, so friends type the bare domain, no port.
+
+Details worth knowing:
+
+- **One agent, many tunnels.** A single agent process serves every server that
+  has a public address, and it's launched with explicit
+  `<tunnel-id>=127.0.0.1:<port>` mappings — so the panel's port settings always
+  win, and changing a server's port just restarts the agent.
+- The agent runs while **the panel** runs, not while a server runs; starting and
+  stopping Minecraft servers never disturbs the other tunnels.
+- Deleting a server removes its tunnel from your playit account too. Unlinking
+  only forgets the key here — tunnels stay on the account.
+- Nothing is installed system-wide: no service, no tray app, no daemon. The
+  agent binary and the key live in `data/playit/`, which is git-ignored.
+- playit publishes agent binaries for Windows and Linux only, so the feature
+  hides itself on macOS.
+
 ## Using the panel
 
 - **Create Server** — pick a loader, a Minecraft version, (a loader build for
@@ -88,7 +123,7 @@ server.
   text configs, make folders. Mods go in `mods/`, plugins in `plugins/`.
 - **Properties** — edit `server.properties` directly.
 - **Settings** — rename, change RAM/port/max-players, custom JVM args (Aikar's
-  flags), Java override, or delete the server.
+  flags), Java override, the **public address** switch, or delete the server.
 
 ## Where things live
 
@@ -99,12 +134,14 @@ MC_hoster/
 │  ├─ net.js            zero-dep HTTP client + downloader
 │  ├─ java.js           Java discovery, version matching, JRE downloads
 │  ├─ loaders.js        per-loader version lists + install logic
+│  ├─ playit.js         playit.gg agent, account link, per-server tunnels
 │  ├─ manager.js        server lifecycle, console, players, stats
 │  └─ store.js          persistence
 ├─ public/              the panel UI (index.html / style.css / app.js)
 ├─ data/                created at runtime — git-ignored, never travels
 │  ├─ servers/<id>/     each server's folder (world, jars, mods, configs)
-│  └─ runtimes/         Java runtimes the panel downloaded for you
+│  ├─ runtimes/         Java runtimes the panel downloaded for you
+│  └─ playit/           playit agent binary + your agent key
 ├─ rack.json            Rack manifest
 ├─ multiapp.json        legacy controller manifest
 ├─ setup.bat            one-time check, run by hand

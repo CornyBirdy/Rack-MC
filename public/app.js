@@ -30,6 +30,7 @@ const state = {
   loaders: [],
   javas: [],
   settings: {},
+  playit: { supported: false, linked: false, agent: "stopped" },
   servers: new Map(), // id -> summary
   route: { name: "dashboard", id: null },
   consoleES: null, // EventSource for the open server console
@@ -70,6 +71,17 @@ function toast(msg, kind = "") {
   setTimeout(() => { t.style.opacity = "0"; t.style.transition = "opacity .3s"; setTimeout(() => t.remove(), 300); }, 3400);
 }
 
+// Clipboard access needs a secure context; the panel is plain http on
+// localhost, which counts, but fall back to a prompt anywhere it doesn't.
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    toast("Copied " + text, "ok");
+  } catch {
+    prompt("Copy this address:", text);
+  }
+}
+
 function modal(html, { wide = false } = {}) {
   const root = $("#modal-root");
   root.innerHTML = `<div class="modal-bg"><div class="modal ${wide ? "wide" : ""}">${html}</div></div>`;
@@ -100,6 +112,7 @@ async function boot() {
     state.loaders = b.loaders;
     state.javas = b.javas;
     state.settings = b.settings;
+    state.playit = b.playit || state.playit;
     b.servers.forEach((s) => state.servers.set(s.id, s));
   } catch (e) {
     view.innerHTML = `<div class="page"><div class="banner err">Failed to reach the backend: ${esc(e.message)}</div></div>`;
@@ -126,6 +139,13 @@ function openGlobalStream() {
 
 async function handleGlobalEvent(e) {
   if (e.type === "ping") return;
+  if (e.type === "playit") {
+    state.playit = e.playit;
+    renderSidebar();
+    if ($("#playit-section")) renderPlayitSection();
+    if (state.route.name === "server" && $("#st-playit")) renderServerPlayit(state.route.id);
+    return;
+  }
   if (e.type === "servers") {
     const { servers } = await API.get("/api/servers");
     state.servers = new Map(servers.map((s) => [s.id, s]));
@@ -181,6 +201,19 @@ function renderSidebar() {
   $$(".nav-item[data-route]").forEach((el) =>
     el.classList.toggle("active", state.route.name === "dashboard" && el.dataset.route === "dashboard"));
 
+  // playit.gg status chip — only once the panel is actually using it
+  const pchip = $("#playit-chip");
+  if (pchip) {
+    const pl = state.playit || {};
+    if (pl.linked && pl.tunnels) {
+      const dot = pl.agent === "online" ? "running" : pl.agent === "error" ? "crashed" : "starting";
+      pchip.style.display = "flex";
+      pchip.innerHTML = `<span class="dot ${dot}"></span> playit ${esc(PLAYIT_AGENT_LABEL[pl.agent] || pl.agent)}`;
+      pchip.onclick = openSettings;
+      pchip.style.cursor = "pointer";
+    } else pchip.style.display = "none";
+  }
+
   // Java status chip
   const chip = $("#java-chip");
   if (state.javas.length) {
@@ -216,6 +249,7 @@ function renderDashboard() {
     el.onclick = (e) => { if (!e.target.closest("[data-act]")) go("#/server/" + el.dataset.id); };
   });
   $$("[data-act]").forEach((btn) => (btn.onclick = (e) => { e.stopPropagation(); quickAction(btn.dataset.id, btn.dataset.act); }));
+  bindAddrChips();
 }
 
 function emptyHTML() {
@@ -251,7 +285,9 @@ function cardHTML(s) {
         <div class="stat">Players <b>${(s.players || []).length}/${s.maxPlayers}</b></div>
       </div>
       <div class="srv-card-foot">
-        <span class="muted mono" style="font-size:12px">localhost:${s.port}</span>
+        ${s.playit && s.playit.enabled
+          ? addrChipHTML(s.playit)
+          : `<span class="muted mono" style="font-size:12px">localhost:${s.port}</span>`}
         ${primary}
       </div>
     </div>`;
@@ -513,7 +549,8 @@ async function renderServer(id) {
             <span class="badge loader">${esc(cap(s.loader))}</span>
             <span class="badge mc">${esc(s.mc || "")}</span>
             ${s.build ? `<span class="badge">${esc(s.build)}</span>` : ""}
-            <span class="badge mono" title="Connect address">localhost:${s.port}</span>
+            <span class="badge mono" title="Local connect address">localhost:${s.port}</span>
+            <span id="srv-addr">${addrChipHTML(s.playit)}</span>
           </div>
         </div>
         <div class="srv-actions" id="srv-actions"></div>
@@ -543,6 +580,7 @@ async function renderServer(id) {
 
   renderActions(s);
   renderEula(s);
+  bindAddrChips();
   $$("#tabs .tab").forEach((t) => (t.onclick = () => selectTab(id, t.dataset.tab)));
   selectTab(id, ["console", "files", "properties", "settings"].includes(state.activeTab) ? state.activeTab : "console");
 
@@ -710,6 +748,9 @@ function patchServerLive(e) {
     renderActions(s); renderEula(s);
     const pill = $("#srv-pill"); if (pill) { pill.className = "pill " + s.status; pill.textContent = (s.status === "running" ? "● " : "") + (STATUS_LABEL[s.status] || s.status); }
     const ts = $("#t-status"); if (ts) ts.textContent = STATUS_LABEL[s.status] || s.status;
+    const addr = $("#srv-addr");
+    if (addr) { addr.innerHTML = addrChipHTML(s.playit); bindAddrChips(addr); }
+    if ($("#st-playit")) renderServerPlayit(s.id);
     if (s.status !== "installing") { const es = $("#eula-slot"); }
   }
   if (e.type === "stats") {
@@ -866,6 +907,10 @@ async function renderSettingsTab(id) {
       <div style="display:flex;gap:10px;margin-top:8px"><button class="btn btn-primary" id="st-save">Save changes</button></div>
 
       <div class="divider"></div>
+      <div class="section-title" style="margin-top:0">Public address</div>
+      <div id="st-playit"></div>
+
+      <div class="divider"></div>
       <div class="section-title" style="color:var(--red)">Danger zone</div>
       <div class="banner err" style="align-items:center">
         <div>Delete this server and all its files (world, mods, configs). This cannot be undone.</div>
@@ -873,6 +918,7 @@ async function renderSettingsTab(id) {
       </div>
     </div>`;
   const mem = $("#st-mem"); mem.oninput = () => ($("#st-memv").textContent = fmtMem(Number(mem.value)));
+  renderServerPlayit(id);
   $("#st-save").onclick = async () => {
     try {
       await API.patch(`/api/servers/${id}`, {
@@ -885,9 +931,72 @@ async function renderSettingsTab(id) {
     } catch (e) { toast(e.message, "err"); }
   };
   $("#st-delete").onclick = async () => {
-    if (!(await confirmDialog("Delete server?", `<p>Permanently delete <b>${esc(def.name)}</b> and every file it owns?</p><p class="muted">Stop it first if it's running.</p>`, "Delete forever"))) return;
+    const pl = state.servers.get(id)?.playit;
+    if (!(await confirmDialog("Delete server?",
+      `<p>Permanently delete <b>${esc(def.name)}</b> and every file it owns?</p>
+       <p class="muted">Stop it first if it's running.${pl && pl.enabled ? " Its playit.gg tunnel is removed from your account too." : ""}</p>`,
+      "Delete forever"))) return;
     try { await API.del(`/api/servers/${id}`); state.servers.delete(id); toast("Server deleted.", "ok"); go("#/"); }
     catch (e) { toast(e.message, "err"); }
+  };
+}
+
+// The per-server public-address switch. Flipping it on creates a Minecraft
+// tunnel on the linked playit.gg account and points it at this server's port.
+function renderServerPlayit(id) {
+  const box = $("#st-playit");
+  if (!box) return;
+  const s = state.servers.get(id) || {};
+  const pl = s.playit || { enabled: false };
+  const acct = state.playit || {};
+
+  if (!acct.supported) {
+    box.innerHTML = `<div class="hint">${esc(acct.note || "playit.gg isn't available on this platform.")}</div>`;
+    return;
+  }
+  if (!acct.linked) {
+    box.innerHTML = `
+      <div class="switch-row">
+        <div class="txt"><b>Let friends join from anywhere</b><span>Connect a free playit.gg account to give this server a public address — no port forwarding.</span></div>
+        <button class="btn btn-sm btn-primary" id="st-pl-setup">Set up</button>
+      </div>`;
+    $("#st-pl-setup").onclick = openSettings;
+    return;
+  }
+
+  const statusLine = !pl.enabled
+    ? "Off — players connect to localhost only."
+    : pl.address
+      ? (acct.agent === "online" ? "Live — anyone can join with this address." : "Address reserved; the tunnel connects when the agent is online.")
+      : "playit is allocating an address…";
+
+  box.innerHTML = `
+    <div class="switch-row">
+      <label class="switch"><input type="checkbox" id="st-pl" ${pl.enabled ? "checked" : ""} /><i></i></label>
+      <div class="txt"><b>Public address via playit.gg</b><span>${esc(statusLine)}</span></div>
+      ${pl.enabled ? addrChipHTML(pl) : ""}
+    </div>
+    ${pl.enabled && pl.address && pl.port
+      ? `<div class="hint">Java clients find the port through an SRV record. If a client refuses the bare domain, use <span class="mono">${esc(pl.host)}:${pl.port}</span>.</div>`
+      : ""}
+    ${pl.disabled ? `<div class="banner warn" style="margin-top:12px">This tunnel is disabled at playit.gg — re-enable it there.</div>` : ""}`;
+
+  bindAddrChips(box);
+  const sw = $("#st-pl");
+  if (!sw) return;
+  sw.onchange = async () => {
+    sw.disabled = true;
+    try {
+      const out = await API.post(`/api/servers/${id}/playit`, { enabled: sw.checked });
+      state.servers.set(id, out.server);
+      toast(sw.checked ? "Public address enabled." : "Public address turned off.", "ok");
+    } catch (e) {
+      toast(e.message, "err");
+    }
+    sw.disabled = false;
+    renderServerPlayit(id);
+    const addr = $("#srv-addr");
+    if (addr) { addr.innerHTML = addrChipHTML((state.servers.get(id) || {}).playit); bindAddrChips(addr); }
   };
 }
 
@@ -921,10 +1030,15 @@ async function openSettings() {
         <label>Default memory for new servers</label>
         <div class="range-row"><input type="range" id="set-mem" min="1024" max="16384" step="512" value="${state.settings.defaultMemory || 4096}" /><span class="range-val" id="set-memv">${fmtMem(state.settings.defaultMemory || 4096)}</span></div>
       </div>
-      <p class="hint">MC Hoster runs under the Multiapp Controller. Each Minecraft server is its own Java process managed here; this panel's own web port is assigned by the controller.</p>
+      <div class="divider"></div>
+      <div class="section-title" style="margin-top:0">Public access · playit.gg</div>
+      <div id="playit-section"></div>
+
+      <p class="hint" style="margin-top:22px">MC Hoster runs under the Multiapp Controller. Each Minecraft server is its own Java process managed here; this panel's own web port is assigned by the controller.</p>
     </div>
     <div class="modal-foot"><span></span><div style="display:flex;gap:10px"><button class="btn btn-ghost" data-x>Close</button><button class="btn btn-primary" id="set-save">Save</button></div></div>`);
   $(".modal-close").onclick = $("[data-x]").onclick = closeModal;
+  renderPlayitSection();
   const mem = $("#set-mem"); mem.oninput = () => ($("#set-memv").textContent = fmtMem(Number(mem.value)));
   $("#set-rescan").onclick = async () => { const { javas } = await API.get("/api/java?rescan=1"); state.javas = javas; closeModal(); renderSidebar(); openSettings(); };
   $("#set-jget").onclick = async () => {
@@ -950,6 +1064,128 @@ async function openSettings() {
       state.settings = await API.put("/api/settings", { javaPath: $("#set-java").value.trim() || null, defaultMemory: Number(mem.value) });
       closeModal(); renderSidebar(); toast("Settings saved.", "ok");
     } catch (e) { toast(e.message, "err"); }
+  };
+}
+
+/* ============================================================== playit.gg */
+/* Public addresses without port forwarding: playit runs a relay, an agent on
+ * this machine keeps an outbound connection to it, and each server gets a
+ * domain that forwards to its local port. The backend owns all of it — this is
+ * the account link plus the per-server switch. */
+
+const PLAYIT_AGENT_LABEL = { stopped: "idle", starting: "connecting", online: "online", error: "error" };
+const PLAYIT_ACCOUNT_NOTE = {
+  guest: "You're on a guest playit account — claim it at playit.gg so you don't lose these addresses.",
+  "email-not-verified": "Verify your email at playit.gg to keep tunnels running.",
+  banned: "This playit account is banned; tunnels won't connect.",
+  "agent-over-limit": "Too many agents on this playit account — remove one at playit.gg/account/agents.",
+  "agent-disabled": "This agent is disabled at playit.gg/account/agents.",
+};
+
+// The address chip shown on cards and headers. Clicking copies it.
+function addrChipHTML(pl) {
+  if (!pl || !pl.enabled) return "";
+  if (!pl.address) return `<span class="addr pending" title="playit is allocating an address">🌍 allocating…</span>`;
+  return `<span class="addr" data-copy="${esc(pl.address)}" title="Public address — click to copy">🌍 ${esc(pl.address)} <span class="copy">⧉</span></span>`;
+}
+function bindAddrChips(root = document) {
+  $$("[data-copy]", root).forEach((el) => (el.onclick = (ev) => { ev.stopPropagation(); copyText(el.dataset.copy); }));
+}
+
+async function playitCall(path, body) {
+  const out = await API.post(path, body);
+  if (out.playit) state.playit = out.playit;
+  return out;
+}
+
+// Rendered inside the Settings modal; re-rendered in place whenever the
+// backend pushes a playit event (claim approved, agent online, …).
+function renderPlayitSection() {
+  const box = $("#playit-section");
+  if (!box) return;
+  const pl = state.playit || {};
+
+  if (!pl.supported) {
+    box.innerHTML = `<div class="hint">${esc(pl.note || "playit.gg isn't available on this platform.")}</div>`;
+    return;
+  }
+
+  if (pl.claim) {
+    const status = {
+      waiting: "Waiting for you to open the link…",
+      visited: "Approve MC Hoster in your browser to finish linking.",
+      accepted: "✔ Approved — finishing up…",
+      rejected: "The request was rejected in the browser.",
+      expired: "That claim link expired.",
+      error: pl.claim.error || "Something went wrong.",
+    }[pl.claim.status];
+    const done = ["rejected", "expired", "error"].includes(pl.claim.status);
+    box.innerHTML = `
+      <div class="claim-box">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+          ${done ? "" : `<span class="spinner"></span>`}<b>${esc(status)}</b>
+        </div>
+        <a class="claim-link" href="${esc(pl.claim.url)}" target="_blank" rel="noopener">${esc(pl.claim.url)}</a>
+        <div class="hint" style="margin-top:10px">Sign in (or make a free account) and approve the agent. This window updates itself.</div>
+        <div style="margin-top:12px;display:flex;gap:8px">
+          <a class="btn btn-sm btn-primary" href="${esc(pl.claim.url)}" target="_blank" rel="noopener">Open the link</a>
+          <button class="btn btn-sm btn-ghost" id="pl-cancel">${done ? "Close" : "Cancel"}</button>
+        </div>
+      </div>`;
+    $("#pl-cancel").onclick = async () => { await playitCall("/api/playit/link/cancel"); renderPlayitSection(); renderSidebar(); };
+    return;
+  }
+
+  if (!pl.linked) {
+    box.innerHTML = `
+      <p class="hint" style="margin-top:0">Give your servers a public address that friends can join — no port forwarding, no router settings, works behind CGNAT. MC Hoster downloads the official playit agent (${esc(pl.version)}, ~5 MB) into its own <span class="mono">data/playit</span> folder and links it to your free playit.gg account. Nothing is installed system-wide.</p>
+      <button class="btn btn-primary" id="pl-link">🌍 Connect playit.gg</button>`;
+    $("#pl-link").onclick = async () => {
+      const btn = $("#pl-link");
+      btn.disabled = true;
+      btn.textContent = pl.installed ? "Starting…" : "⬇ Downloading agent…";
+      try {
+        await playitCall("/api/playit/link");
+        renderPlayitSection();
+      } catch (e) {
+        toast(e.message, "err");
+        btn.disabled = false;
+        btn.textContent = "🌍 Connect playit.gg";
+      }
+    };
+    return;
+  }
+
+  const dot = pl.agent === "online" ? "running" : pl.agent === "error" ? "crashed" : pl.tunnels ? "starting" : "stopped";
+  const accountNote = pl.account && PLAYIT_ACCOUNT_NOTE[pl.account.status];
+  box.innerHTML = `
+    <div class="file-table" style="margin-bottom:12px">
+      <div class="file-row">
+        <span class="fic"><span class="dot ${dot}"></span></span>
+        <span class="fname">Agent ${esc(PLAYIT_AGENT_LABEL[pl.agent] || pl.agent)}${pl.tunnels ? ` · ${pl.tunnels} tunnel${pl.tunnels === 1 ? "" : "s"}` : " · no tunnels yet"}</span>
+        <span class="fsize">${esc(pl.version)}</span>
+      </div>
+    </div>
+    ${pl.agentError ? `<div class="banner err" style="margin:0 0 12px">${esc(pl.agentError)}</div>` : ""}
+    ${accountNote ? `<div class="banner warn" style="margin:0 0 12px">${esc(accountNote)} <a href="https://playit.gg/account" target="_blank" rel="noopener" style="text-decoration:underline">Open playit.gg</a></div>` : ""}
+    <p class="hint" style="margin-top:0">Turn a public address on per server, in that server's <b>Settings</b> tab. Tunnels stay up while the panel runs.</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn btn-sm" id="pl-refresh">↻ Refresh tunnels</button>
+      <a class="btn btn-sm" href="https://playit.gg/account/tunnels" target="_blank" rel="noopener">Manage at playit.gg</a>
+      <button class="btn btn-sm btn-red" id="pl-unlink">Unlink account</button>
+    </div>`;
+  $("#pl-refresh").onclick = async () => {
+    const btn = $("#pl-refresh");
+    btn.disabled = true; btn.textContent = "↻ Refreshing…";
+    try { await playitCall("/api/playit/refresh"); } catch (e) { toast(e.message, "err"); }
+    renderPlayitSection();
+  };
+  $("#pl-unlink").onclick = async () => {
+    if (!(await confirmDialog("Unlink playit.gg?",
+      "<p>Public addresses stop working until you link again.</p><p class='muted'>The tunnels stay on your playit.gg account — this panel just forgets the key.</p>",
+      "Unlink"))) return;
+    try { await playitCall("/api/playit/unlink"); toast("Unlinked from playit.gg.", "ok"); renderPlayitSection(); renderSidebar(); }
+    catch (e) { toast(e.message, "err"); }
   };
 }
 
