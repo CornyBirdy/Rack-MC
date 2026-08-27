@@ -1456,6 +1456,9 @@ async function renderSettingsTab(id) {
   const s = state.servers.get(id);
   const data = await API.get(`/api/servers/${id}`);
   const def = data.def;
+  const pauseOn = Number(def.pauseWhenEmpty) > 0;
+  const pauseSecs = pauseOn ? Number(def.pauseWhenEmpty) : 60;
+  const canPause = data.pauseSupported !== false;
   const body = $("#tab-body");
   body.innerHTML = `
     <div style="max-width:620px">
@@ -1478,6 +1481,17 @@ async function renderSettingsTab(id) {
         <label>Java runtime override <span class="muted">(optional)</span></label>
         <input type="text" id="st-java" class="mono" value="${esc(def.javaPath || "")}" placeholder="uses global default: ${esc(state.javas[0]?.path || "none found")}" />
       </div>
+      <div class="form-row">
+        <label>Sleep when empty</label>
+        <div class="switch-row">
+          <label class="switch"><input type="checkbox" id="st-pause" ${pauseOn ? "checked" : ""} ${canPause ? "" : "disabled"} /><i></i></label>
+          <div class="txt"><b>Pause while nobody is online</b><span>CPU drops to almost nothing. The server stays up and RAM stays reserved, so rejoining is instant.</span></div>
+          <input type="number" id="st-pause-secs" min="10" step="10" value="${pauseSecs}" style="width:88px" ${pauseOn && canPause ? "" : "disabled"} />
+        </div>
+        <div class="hint">${canPause
+          ? "Seconds of emptiness before pausing. Nothing ticks while paused — crops, furnaces, redstone and the daylight cycle all stop, including in spawn and force-loaded chunks."
+          : `Minecraft ${esc(def.mc)} cannot pause — the setting arrived in 1.21.2.`}</div>
+      </div>
       <div style="display:flex;gap:10px;margin-top:8px"><button class="btn btn-primary" id="st-save">Save changes</button></div>
 
       <div class="divider"></div>
@@ -1492,6 +1506,7 @@ async function renderSettingsTab(id) {
       </div>
     </div>`;
   const mem = $("#st-mem"); mem.oninput = () => ($("#st-memv").textContent = fmtMem(Number(mem.value)));
+  const pauseSw = $("#st-pause"); pauseSw.onchange = () => ($("#st-pause-secs").disabled = !pauseSw.checked);
   renderServerPlayit(id);
   $("#st-save").onclick = async () => {
     try {
@@ -1499,6 +1514,7 @@ async function renderSettingsTab(id) {
         name: $("#st-name").value.trim(), icon: $("#st-icon").value.trim() || "🎮",
         port: Number($("#st-port").value), maxPlayers: Number($("#st-max").value),
         memory: Number(mem.value), jvmArgs: $("#st-jvm").value.trim(), javaPath: $("#st-java").value.trim() || null,
+        pauseWhenEmpty: pauseSw.checked ? Number($("#st-pause-secs").value) || 60 : 0,
       });
       toast("Settings saved.", "ok");
       const fresh = await API.get(`/api/servers/${id}`); state.servers.set(id, fresh.server); renderServer(id);

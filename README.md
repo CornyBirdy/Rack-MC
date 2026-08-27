@@ -191,7 +191,24 @@ Details worth knowing:
   text configs, make folders. Mods go in `mods/`, plugins in `plugins/`.
 - **Properties** — edit `server.properties` directly.
 - **Settings** — rename, change RAM/port/max-players, custom JVM args (Aikar's
-  flags), Java override, the **public address** switch, or delete the server.
+  flags), Java override, the **public address** switch, **sleep when empty**, or
+  delete the server.
+
+### Sleep when empty
+
+Off by default. Turn it on and the server pauses its tick loop once it has been
+empty for the number of seconds you set — CPU falls to almost nothing while the
+process stays up, so rejoining is instant and the RAM stays reserved.
+
+This drives Minecraft's own `pause-when-empty-seconds`, so it needs **1.21.2 or
+newer**; on older versions the switch is disabled and the key is never written.
+Leaving it off writes `-1` rather than nothing, so a server never silently
+inherits Minecraft's built-in 60-second default.
+
+Nothing ticks while paused — crops, furnaces, redstone, mob spawning and the
+daylight cycle all stop, **including in spawn chunks and force-loaded chunks**.
+Those are the only chunks that ran with nobody online in the first place, so if
+you keep an offline farm there, leave this off.
 
 ## System monitor
 
