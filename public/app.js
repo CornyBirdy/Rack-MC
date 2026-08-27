@@ -172,6 +172,7 @@ async function handleGlobalEvent(e) {
   } else if (s) {
     if (e.type === "status") Object.assign(s, e);
     if (e.type === "players") s.players = e.players;
+    if (e.type === "pings") s.pings = e.pings;
     if (e.type === "stats") s.stats = { memMB: e.memMB, cpu: e.cpu };
   }
   renderSidebar();
@@ -983,6 +984,7 @@ function openConsoleStream(id, out) {
     if (e.type === "ping") return;
     if (e.type === "console") appendConsole(out, e.stream, e.line);
     else if (e.type === "players") { const s = state.servers.get(id); if (s) { s.players = e.players; renderPlayers(s); } }
+    else if (e.type === "pings") { const s = state.servers.get(id); if (s) { s.pings = e.pings; renderPlayers(s); } }
     else if (e.type === "status") {
       const s = state.servers.get(id); if (s) Object.assign(s, e);
       const inp = $("#con-in"); if (inp) inp.disabled = e.status !== "running";
@@ -1000,8 +1002,19 @@ function renderPlayers(s) {
   if (count) count.textContent = `${(s.players || []).length}/${s.maxPlayers}`;
   if (!list) return;
   list.innerHTML = (s.players || []).length
-    ? s.players.map((p) => `<div class="player"><span class="head">${esc(p[0].toUpperCase())}</span> ${esc(p)}</div>`).join("")
+    ? s.players
+        .map((p) => `<div class="player"><span class="head">${esc(p[0].toUpperCase())}</span><span class="pname">${esc(p)}</span>${pingChip((s.pings || {})[p])}</div>`)
+        .join("")
     : `<div class="players-empty">${s.status === "running" ? "No one online." : "Server offline."}</div>`;
+}
+
+// Latency comes from the server's own `ping` command, which only Paper,
+// Purpur and plugin-added variants have — elsewhere we show a quiet dash.
+function pingChip(ms) {
+  if (!Number.isFinite(ms))
+    return `<span class="ping none" title="This server doesn't report ping — Paper and Purpur do.">—</span>`;
+  const q = ms < 80 ? "good" : ms < 160 ? "ok" : "bad";
+  return `<span class="ping ${q}" title="${ms} ms round-trip"><i></i>${ms}<small>ms</small></span>`;
 }
 
 /* ------------------------------------------------------- live patch (server) */
@@ -1026,6 +1039,9 @@ function patchServerLive(e) {
   if (e.type === "players") {
     const p = $("#t-players"); const s = state.servers.get(e.id);
     if (p) p.innerHTML = `${e.players.length} <small>/ ${s.maxPlayers}</small>`;
+  }
+  if (e.type === "pings") {
+    const s = state.servers.get(e.id); if (s) renderPlayers(s);
   }
   if (e.type === "install") {
     const out = $("#con-out"); if (out && state.activeTab === "console") appendConsole(out, "sys", e.line);

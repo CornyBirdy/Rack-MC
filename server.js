@@ -156,6 +156,7 @@ function attachConsoleStream(res, id) {
   for (const entry of s.log) sseSend(res, { type: "console", id, stream: entry.stream, line: entry.line });
   sseSend(res, { type: "status", ...manager.summary(id) });
   sseSend(res, { type: "players", id, players: s.players });
+  sseSend(res, { type: "pings", id, pings: s.pings });
 }
 
 /* -------------------------------------------------------------------- routes */
