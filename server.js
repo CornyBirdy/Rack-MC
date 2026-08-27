@@ -241,6 +241,11 @@ const server = http.createServer(async (req, res) => {
     if (p === "/api/playit/unlink" && req.method === "POST")
       return sendJSON(res, 200, { playit: playit.unlink() });
 
+    // The account's own tunnels, so a server can adopt an address you already
+    // handed out instead of getting a brand-new one.
+    if (p === "/api/playit/tunnels" && req.method === "GET")
+      return guard(async () => sendJSON(res, 200, { tunnels: await playit.listAccountTunnels() }))(req, res);
+
     if (p === "/api/playit/refresh" && req.method === "POST")
       return guard(async () => sendJSON(res, 200, { playit: await playit.refresh() }))(req, res);
 
@@ -312,7 +317,7 @@ const server = http.createServer(async (req, res) => {
       if (action === "playit" && req.method === "POST")
         return guard(async () => {
           const body = await readJSONBody(req);
-          const info = await playit.setEnabled(id, !!body.enabled);
+          const info = await playit.setEnabled(id, !!body.enabled, { tunnelId: body.tunnelId || null });
           manager.events.emit("event", { type: "status", ...manager.summary(id) });
           sendJSON(res, 200, { playit: info, server: manager.summary(id) });
         })(req, res);

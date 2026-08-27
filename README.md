@@ -85,12 +85,14 @@ agent on this machine holds an outbound connection and playit forwards a domain
 to your local port.
 
 1. **Settings → Public access · playit.gg → Connect playit.gg.** The panel
-   downloads the official agent (pinned to `v0.15.26`, ~5 MB) into
+   downloads the official agent (pinned to `v0.17.1`, ~5 MB) into
    `data/playit/` and shows a `playit.gg/claim/…` link.
 2. Open the link, sign in (a free account is enough) and approve the agent. The
-   panel notices and stores the key in `data/playit/playit.toml`.
-3. On any server, **Settings → Public address → toggle it on.** That creates a
-   Minecraft tunnel on your account and points it at that server's port.
+   panel notices, stores the key in `data/playit/playit.toml`, and brings the
+   agent online.
+3. On any server, **Settings → Public address → toggle it on.** Pick one of your
+   existing tunnels — it keeps its address and moves to this panel — or let it
+   make a fresh Minecraft tunnel.
 
 The address (something like `crispy-fox.gl.at.ply.gg`) then shows up on the
 server's card, its header, and in Settings — click it to copy. Minecraft Java
@@ -98,12 +100,20 @@ tunnels come with an SRV record, so friends type the bare domain, no port.
 
 Details worth knowing:
 
-- **One agent, many tunnels.** A single agent process serves every server that
-  has a public address, and it's launched with explicit
-  `<tunnel-id>=127.0.0.1:<port>` mappings — so the panel's port settings always
-  win, and changing a server's port just restarts the agent.
-- The agent runs while **the panel** runs, not while a server runs; starting and
-  stopping Minecraft servers never disturbs the other tunnels.
+- **One agent, many tunnels.** A single agent process serves every tunnel
+  assigned to it. Routing lives on the tunnels themselves — the panel sets each
+  one's local address through playit's API (the same call their website's
+  "transfer tunnel" screen makes) — so its port settings always win and nothing
+  restarts when you change a port or add a server.
+- The agent stays connected while **the panel** runs, not while a server runs;
+  starting and stopping Minecraft servers never disturbs the tunnels. Staying
+  connected is also what makes playit.gg show a real agent version, which its
+  tunnel-transfer screen refuses to work without.
+- **Version matters.** playit's control server rejects old agents (`Agent
+  version is unknown … no longer supported`). `v0.17.1` is the newest release
+  that is still a single self-contained executable; 1.x splits into a daemon, a
+  service and a tray app, which a portable panel has no business installing.
+  Bumping the pin re-downloads the agent and deletes the superseded one.
 - Deleting a server removes its tunnel from your playit account too. Unlinking
   only forgets the key here — tunnels stay on the account.
 - Nothing is installed system-wide: no service, no tray app, no daemon. The

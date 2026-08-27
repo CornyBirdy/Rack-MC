@@ -985,19 +985,72 @@ function renderServerPlayit(id) {
   const sw = $("#st-pl");
   if (!sw) return;
   sw.onchange = async () => {
-    sw.disabled = true;
+    if (!sw.checked) return applyPlayit(id, sw, { enabled: false });
+    // Turning it on: offer the account's existing tunnels first, so an address
+    // friends already have can move here instead of a new one being minted.
+    sw.checked = false;
+    const pick = await pickTunnel(id);
+    if (!pick) return;
+    applyPlayit(id, sw, { enabled: true, tunnelId: pick === "new" ? null : pick });
+  };
+}
+
+async function applyPlayit(id, sw, body) {
+  if (sw) sw.disabled = true;
+  try {
+    const out = await API.post(`/api/servers/${id}/playit`, body);
+    state.servers.set(id, out.server);
+    toast(body.enabled ? "Public address enabled." : "Public address turned off.", "ok");
+  } catch (e) {
+    toast(e.message, "err");
+  }
+  if (sw) sw.disabled = false;
+  renderServerPlayit(id);
+  const addr = $("#srv-addr");
+  if (addr) { addr.innerHTML = addrChipHTML((state.servers.get(id) || {}).playit); bindAddrChips(addr); }
+}
+
+// Resolves to a tunnel id, the string "new", or null if the user backed out.
+// Skips straight to "new" when the account has nothing worth adopting.
+function pickTunnel(id) {
+  return new Promise(async (resolve) => {
+    let tunnels = [];
     try {
-      const out = await API.post(`/api/servers/${id}/playit`, { enabled: sw.checked });
-      state.servers.set(id, out.server);
-      toast(sw.checked ? "Public address enabled." : "Public address turned off.", "ok");
+      tunnels = (await API.get("/api/playit/tunnels")).tunnels;
     } catch (e) {
       toast(e.message, "err");
+      return resolve(null);
     }
-    sw.disabled = false;
-    renderServerPlayit(id);
-    const addr = $("#srv-addr");
-    if (addr) { addr.innerHTML = addrChipHTML((state.servers.get(id) || {}).playit); bindAddrChips(addr); }
-  };
+    const free = tunnels.filter((t) => !t.usedBy);
+    if (!free.length) return resolve("new");
+
+    modal(`
+      <div class="modal-head"><h2>🌍 Public address</h2><button class="modal-close">×</button></div>
+      <div class="modal-body">
+        <p class="hint" style="margin-top:0">Point one of your existing playit.gg tunnels at this server — it keeps its address, and MC Hoster takes over forwarding it — or make a new one.</p>
+        <div class="file-table">
+          ${free.map((t) => `
+            <div class="file-row pick" data-t="${esc(t.id)}" style="cursor:pointer">
+              <span class="fic">${t.recommended ? "🟩" : "🔌"}</span>
+              <span class="fname">${esc(t.name)}
+                <span class="muted" style="font-size:11.5px">${esc(t.address || (t.status === "pending" ? "address pending" : "no address"))}${t.agent ? " · on " + esc(t.agent) : ""}</span>
+              </span>
+              <span class="fsize">${esc(t.type || t.portType)}</span>
+            </div>`).join("")}
+          <div class="file-row pick" data-t="new" style="cursor:pointer">
+            <span class="fic">＋</span><span class="fname">Create a new Minecraft tunnel<span class="muted" style="font-size:11.5px">Fresh address, set up automatically</span></span>
+            <span class="fsize">minecraft-java</span>
+          </div>
+        </div>
+        <p class="hint">Tunnels already used by another server in this panel aren't listed.</p>
+      </div>
+      <div class="modal-foot"><span></span><button class="btn btn-ghost" data-x>Cancel</button></div>`, { wide: true });
+
+    let done = false;
+    const finish = (v) => { if (done) return; done = true; closeModal(); resolve(v); };
+    $(".modal-close").onclick = $("[data-x]").onclick = () => finish(null);
+    $$(".file-row.pick").forEach((el) => (el.onclick = () => finish(el.dataset.t)));
+  });
 }
 
 /* ---------------------------------------------------------------- settings */
