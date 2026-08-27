@@ -1149,16 +1149,15 @@ async function loadInstalled(id) {
   if (count) count.textContent = total ? `· ${total} installed` : "";
 
   const packRow = data.pack
-    ? `<div class="file-row">
+    ? `<div class="file-row md-item" data-slug="${esc(data.pack.projectId || "")}">
          <span class="fic">📦</span>
          <span class="fname"><b>${esc(data.pack.name)}</b> ${esc(data.pack.versionNumber || "")}
            <span class="muted">modpack · ${data.pack.files} files installed with the server</span></span>
-         <a class="btn btn-sm btn-ghost" href="https://modrinth.com/modpack/${esc(data.pack.projectId || "")}" target="_blank" rel="noopener">View on Modrinth</a>
        </div>`
     : "";
 
   const rows = data.items.map((it) => `
-    <div class="file-row md-item">
+    <div class="file-row md-item" data-slug="${esc(it.slug || "")}">
       <span class="fic">${it.icon ? `<img class="md-ic" src="${esc(it.icon)}" alt="" loading="lazy" />` : "🧩"}</span>
       <span class="fname">
         <a href="https://modrinth.com/project/${esc(it.slug)}" target="_blank" rel="noopener">${esc(it.title)}</a>
@@ -1179,6 +1178,7 @@ async function loadInstalled(id) {
     ? `<div class="file-table">${packRow}${rows}${loose}</div>`
     : `<div class="pk-empty">Nothing installed yet — search below to add some.</div>`;
 
+  bindModrinthLinks(box);
   $$("[data-del]", box).forEach((el) => (el.onclick = async () => {
     const file = el.dataset.del;
     if (!(await confirmDialog("Remove?",
@@ -1245,6 +1245,22 @@ function bindBrowseActions(id, root) {
     if (b._bound) return;
     b._bound = true;
     b.onclick = () => openVersionPicker(id, b.dataset.versions);
+  });
+  bindModrinthLinks(root);
+}
+
+// Clicking anywhere on a result — but not on its buttons — opens the project's
+// Modrinth page, which is where the screenshots, changelog and comments are.
+function bindModrinthLinks(root) {
+  $$("[data-slug]", root).forEach((row) => {
+    if (row._linked || !row.dataset.slug) return;
+    row._linked = true;
+    row.title = "Open on Modrinth";
+    row.onclick = (e) => {
+      // The row's own controls win — install, update, the version list, delete.
+      if (e.target.closest("button, a, input, select, label, [data-del]")) return;
+      window.open(`https://modrinth.com/project/${encodeURIComponent(row.dataset.slug)}`, "_blank", "noopener");
+    };
   });
 }
 
