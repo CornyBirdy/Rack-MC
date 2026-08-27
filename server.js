@@ -17,6 +17,7 @@ const manager = require("./lib/manager");
 const java = require("./lib/java");
 const playit = require("./lib/playit");
 const sysmon = require("./lib/sysmon");
+const modrinth = require("./lib/modrinth");
 
 // Port precedence: explicit flag, then the launcher's MC_PORT (our portEnv),
 // then whatever Rack/the old controller assigned, then the standalone default.
@@ -207,6 +208,45 @@ const server = http.createServer(async (req, res) => {
         sendJSON(res, 200, { builds });
       })(req, res);
 
+    // ---- Modrinth ----
+    // Browsing is a thin proxy: the panel's own origin does the talking so the
+    // page needs no CORS dance, and every call is public + unauthenticated.
+    if (p === "/api/modrinth/search" && req.method === "GET")
+      return guard(async () =>
+        sendJSON(
+          res,
+          200,
+          await modrinth.search({
+            query: q.get("q") || "",
+            projectType: q.get("type") || "mod",
+            loaders: q.getAll("loader"),
+            mc: q.get("mc") || null,
+            serverOnly: q.get("server") !== "0",
+            index: q.get("sort") || "relevance",
+            offset: Number(q.get("offset")) || 0,
+            limit: Math.min(50, Number(q.get("limit")) || 20),
+          })
+        )
+      )(req, res);
+
+    // GET /api/modrinth/versions?project=slug&loader=fabric&mc=1.21.1
+    if (p === "/api/modrinth/versions" && req.method === "GET")
+      return guard(async () => {
+        const project = q.get("project");
+        if (!project) throw new Error("A project is required.");
+        const versions = await modrinth.versions(project, {
+          loaders: q.getAll("loader"),
+          mc: q.get("mc") || null,
+        });
+        sendJSON(res, 200, { versions });
+      })(req, res);
+
+    // GET /api/modrinth/project/:idOrSlug
+    if (parts[1] === "modrinth" && parts[2] === "project" && parts[3] && req.method === "GET")
+      return guard(async () =>
+        sendJSON(res, 200, { project: await modrinth.project(parts[3]) })
+      )(req, res);
+
     // ---- java ----
     if (p === "/api/java" && req.method === "GET") {
       const { javas } = await java.discover(q.get("rescan") === "1");
@@ -352,6 +392,36 @@ const server = http.createServer(async (req, res) => {
         manager.writeProperties(id, String(body.text || ""));
         return sendJSON(res, 200, { ok: true });
       }
+
+      // ---- Modrinth content (mods / plugins / datapacks) ----
+      // What this server can run, and what it already has installed.
+      if (action === "content" && !parts[4] && req.method === "GET")
+        return guard(async () => sendJSON(res, 200, modrinth.installed(store.dirFor(id), def)))(req, res);
+
+      // POST /api/servers/:id/content {versionId} | {projectId}
+      // Progress lines ride the install event bus so the console tab shows the
+      // download as it happens, exactly like the initial server install does.
+      if (action === "content" && !parts[4] && req.method === "POST")
+        return guard(async () => {
+          const body = await readJSONBody(req);
+          const out = await modrinth.install(store.dirFor(id), def, {
+            versionId: body.versionId || null,
+            projectId: body.projectId || null,
+            log: (line) => manager.emitInstall(id, line),
+          });
+          sendJSON(res, 200, { ...out, running: manager.slot(id).status === "running" });
+        })(req, res);
+
+      // DELETE /api/servers/:id/content?file=mods/foo.jar
+      if (action === "content" && !parts[4] && req.method === "DELETE")
+        return guard(async () =>
+          sendJSON(res, 200, modrinth.remove(store.dirFor(id), def, q.get("file")))
+        )(req, res);
+
+      if (action === "content" && parts[4] === "updates" && req.method === "GET")
+        return guard(async () =>
+          sendJSON(res, 200, { updates: await modrinth.updates(store.dirFor(id), def) })
+        )(req, res);
 
       // file manager
       if (action === "files" && req.method === "GET")

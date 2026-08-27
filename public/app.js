@@ -35,6 +35,7 @@ const state = {
   servers: new Map(), // id -> summary
   route: { name: "dashboard", id: null },
   consoleES: null, // EventSource for the open server console
+  content: null, // last /content payload for the open server (installed mods)
   activeTab: "console",
 };
 
@@ -491,28 +492,30 @@ async function openCreateWizard() {
   function renderStep() {
     back.style.visibility = wiz.step > 1 ? "visible" : "hidden";
     if (wiz.step === 1) renderLoaderStep();
-    else if (wiz.step === 2) renderVersionStep();
+    else if (wiz.step === 2) (isPack() ? renderPackStep : renderVersionStep)();
     else renderDetailsStep();
   }
+
+  const isPack = () => (state.loaders.find((l) => l.id === wiz.loader) || {}).kind === "pack";
 
   function renderLoaderStep() {
     next.textContent = "Next →";
     next.disabled = !wiz.loader;
     body.innerHTML = stepsBar() + `
-      <p class="muted" style="margin:0 0 16px">Pick what powers your server. <b>Fabric, Forge, NeoForge &amp; Quilt</b> run mods; Paper &amp; Purpur run plugins.</p>
+      <p class="muted" style="margin:0 0 16px">Pick what powers your server. <b>Fabric, Forge, NeoForge &amp; Quilt</b> run mods; Paper &amp; Purpur run plugins; a <b>Modrinth modpack</b> brings its own loader and mods with it.</p>
       <div class="loader-grid">
         ${state.loaders.map((l) => `
           <button class="loader-opt ${wiz.loader === l.id ? "sel" : ""}" data-l="${l.id}">
             <span class="li">${loaderEmoji(l.id)}</span>
             <span class="ltxt">
               <strong>${esc(l.label)}</strong>
-              <span class="kind ${l.kind}">${l.kind === "mod" ? "modloader" : l.kind}</span>
+              <span class="kind ${l.kind}">${KIND_LABEL[l.kind] || l.kind}</span>
               <p>${esc(l.blurb)}</p>
             </span>
           </button>`).join("")}
       </div>`;
     $$(".loader-opt", body).forEach((el) => (el.onclick = () => {
-      wiz.loader = el.dataset.l; wiz.mc = null; wiz.build = null;
+      wiz.loader = el.dataset.l; wiz.mc = null; wiz.build = null; wiz.pack = null;
       renderLoaderStep();
     }));
   }
@@ -534,6 +537,83 @@ async function openCreateWizard() {
       <div id="java-req"></div>`;
     const snap = $("#snap"); if (snap) snap.onchange = () => { wiz.showSnapshots = snap.checked; wiz.mc = null; fillMc(); };
     await fillMc();
+  }
+
+  /* Modpacks don't fit the loader/version/build shape — you pick a pack first,
+   * and the pack decides the Minecraft version and modloader. So step 2 becomes
+   * a Modrinth search instead of two dropdowns. */
+  async function renderPackStep() {
+    next.disabled = !wiz.build;
+    body.innerHTML = stepsBar() + `
+      <div class="pk-bar">
+        <input type="text" id="pk-q" placeholder="Search Modrinth modpacks…" value="${esc(wiz.packQuery || "")}" autocomplete="off" />
+        <select id="pk-sort" style="width:auto;min-width:140px">
+          ${[["relevance", "Best match"], ["downloads", "Most downloads"], ["follows", "Most followed"], ["updated", "Recently updated"]]
+            .map(([v, l]) => `<option value="${v}" ${(wiz.packSort || "downloads") === v ? "selected" : ""}>${l}</option>`).join("")}
+        </select>
+      </div>
+      <div class="pk-list" id="pk-list"></div>
+      <div class="form-row" id="pk-ver-row" style="display:${wiz.pack ? "block" : "none"};margin-top:14px">
+        <label>Pack version</label>
+        <div id="pk-ver"></div>
+      </div>
+      <div id="java-req"></div>`;
+
+    const q = $("#pk-q"), sort = $("#pk-sort");
+    let timer = null;
+    q.oninput = () => { clearTimeout(timer); timer = setTimeout(runSearch, 350); };
+    q.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); clearTimeout(timer); runSearch(); } };
+    sort.onchange = runSearch;
+    await runSearch();
+    if (wiz.pack) await loadPackVersions();
+  }
+
+  async function runSearch() {
+    const list = $("#pk-list");
+    if (!list) return;
+    wiz.packQuery = $("#pk-q").value.trim();
+    wiz.packSort = $("#pk-sort").value;
+    list.innerHTML = `<div class="pk-empty"><span class="spinner"></span> Searching Modrinth…</div>`;
+    try {
+      const r = await API.get(`/api/modrinth/search?type=modpack&limit=24&sort=${encodeURIComponent(wiz.packSort)}&q=${encodeURIComponent(wiz.packQuery)}`);
+      if (!r.hits.length) { list.innerHTML = `<div class="pk-empty">No modpacks matched “${esc(wiz.packQuery)}”.</div>`; return; }
+      list.innerHTML = r.hits.map((h) => projectRowHTML(h, wiz.pack && wiz.pack.id === h.id)).join("");
+      $$(".pk-row", list).forEach((el) => (el.onclick = () => {
+        const p = r.hits.find((h) => h.id === el.dataset.id);
+        wiz.pack = p; wiz.build = null; wiz.mc = null;
+        next.disabled = true;
+        $$(".pk-row", list).forEach((x) => x.classList.toggle("sel", x.dataset.id === p.id));
+        loadPackVersions();
+      }));
+    } catch (e) {
+      list.innerHTML = `<div class="banner err" style="margin:0">Couldn't reach Modrinth: ${esc(e.message)}</div>`;
+    }
+  }
+
+  async function loadPackVersions() {
+    const row = $("#pk-ver-row"), area = $("#pk-ver");
+    if (!row || !wiz.pack) return;
+    row.style.display = "block";
+    area.innerHTML = `<span class="spinner"></span> <span class="muted">Loading versions of ${esc(wiz.pack.title)}…</span>`;
+    try {
+      const { versions } = await API.get(`/api/modrinth/versions?project=${encodeURIComponent(wiz.pack.slug || wiz.pack.id)}`);
+      if (!versions.length) { area.innerHTML = `<div class="muted">This pack has no published versions.</div>`; return; }
+      area.innerHTML = `<select id="pk-vsel">${versions.slice(0, 200).map((v, i) =>
+        `<option value="${esc(v.id)}">${esc(v.number)} · MC ${esc(v.gameVersions[0] || "?")} · ${esc(v.loaders[0] || "?")}${v.type !== "release" ? " · " + esc(v.type) : ""}${i === 0 ? " · latest" : ""}</option>`).join("")}</select>`;
+      const sel = $("#pk-vsel");
+      const apply = () => {
+        const v = versions.find((x) => x.id === sel.value);
+        wiz.build = v.id;
+        wiz.mc = v.gameVersions[0] || null;
+        wiz.packVersion = v;
+        next.disabled = !wiz.mc;
+        refreshJavaReq();
+      };
+      sel.onchange = apply;
+      apply();
+    } catch (e) {
+      area.innerHTML = `<div class="banner err" style="margin:0">${esc(e.message)}</div>`;
+    }
   }
 
   async function fillMc() {
@@ -621,7 +701,7 @@ async function openCreateWizard() {
     body.innerHTML = stepsBar() + `
       <div class="form-row">
         <label>Server name</label>
-        <input type="text" id="d-name" placeholder="My ${cap(wiz.loader)} Server" value="My ${esc(cap(wiz.loader))} Server" />
+        <input type="text" id="d-name" placeholder="${esc(defaultName())}" value="${esc(defaultName())}" />
       </div>
       <div class="two-col">
         <div class="form-row">
@@ -643,7 +723,10 @@ async function openCreateWizard() {
         <div class="hint">${loaderMemHint(wiz.loader)}</div>
       </div>
       <div class="summary-box muted" style="font-size:12.5px;background:var(--bg-2);border:1px solid var(--line);border-radius:8px;padding:12px">
-        <b style="color:var(--text)">${esc(cap(wiz.loader))}</b> · Minecraft <b style="color:var(--text)">${esc(wiz.mc)}</b>${wiz.build ? ` · build <b style="color:var(--text)">${esc(wiz.build)}</b>` : ""}
+        ${wiz.pack
+          ? `📦 <b style="color:var(--text)">${esc(wiz.pack.title)}</b> ${esc(wiz.packVersion ? wiz.packVersion.number : "")} · Minecraft <b style="color:var(--text)">${esc(wiz.mc)}</b> · ${esc((wiz.packVersion && wiz.packVersion.loaders[0]) || "")}
+             <div style="margin-top:6px">Its mods and configs are downloaded during setup — client-only mods are left out.</div>`
+          : `<b style="color:var(--text)">${esc(cap(wiz.loader))}</b> · Minecraft <b style="color:var(--text)">${esc(wiz.mc)}</b>${wiz.build ? ` · build <b style="color:var(--text)">${esc(wiz.build)}</b>` : ""}`}
         ${wiz.javaReq
           ? wiz.javaReq.ok
             ? `<div style="margin-top:8px">☕ Java ${wiz.javaReq.required} · using ${esc(wiz.javaReq.java.version)}</div>`
@@ -652,6 +735,10 @@ async function openCreateWizard() {
       </div>`;
     const mem = $("#d-mem");
     mem.oninput = () => ($("#d-memv").textContent = fmtMem(Number(mem.value)));
+  }
+
+  function defaultName() {
+    return wiz.pack ? wiz.pack.title : `My ${cap(wiz.loader)} Server`;
   }
 
   function suggestPort() {
@@ -667,7 +754,7 @@ async function openCreateWizard() {
     // create
     const spec = {
       loader: wiz.loader, mc: wiz.mc, build: wiz.build,
-      name: $("#d-name").value.trim() || `My ${cap(wiz.loader)} Server`,
+      name: $("#d-name").value.trim() || defaultName(),
       port: Number($("#d-port").value), maxPlayers: Number($("#d-max").value),
       memory: Number($("#d-mem").value),
     };
@@ -685,12 +772,14 @@ async function openCreateWizard() {
 }
 
 function loaderEmoji(id) {
-  return { vanilla: "🟩", paper: "📄", purpur: "🟣", fabric: "🧵", quilt: "🧶", forge: "🔨", neoforge: "🌘" }[id] || "🎮";
+  return { vanilla: "🟩", paper: "📄", purpur: "🟣", fabric: "🧵", quilt: "🧶", forge: "🔨", neoforge: "🌘", modrinth: "📦" }[id] || "🎮";
 }
+const KIND_LABEL = { mod: "modloader", pack: "modpack", plugin: "plugin", vanilla: "vanilla" };
 function loaderVersionLabel(id) {
   return { fabric: "Fabric loader version", quilt: "Quilt loader version", forge: "Forge build", neoforge: "NeoForge build" }[id] || "Build";
 }
 function loaderMemHint(id) {
+  if (id === "modrinth") return "Big packs want 6–8 GB; small optimisation packs are happy with 4.";
   if (id === "vanilla") return "2–4 GB is plenty for vanilla.";
   if (id === "paper" || id === "purpur") return "3–6 GB depending on plugins and players.";
   return "Modded servers are hungry — 4–8 GB for most packs, more for big ones.";
@@ -718,7 +807,8 @@ async function renderServer(id) {
             <span class="pill ${s.status}" id="srv-pill">${s.status === "running" ? "● " : ""}${STATUS_LABEL[s.status] || s.status}</span>
             <span class="badge loader">${esc(cap(s.loader))}</span>
             <span class="badge mc">${esc(s.mc || "")}</span>
-            ${s.build ? `<span class="badge">${esc(s.build)}</span>` : ""}
+            ${s.modLoader ? `<span class="badge loader">${esc(cap(s.modLoader))}</span>` : ""}
+            ${s.pack ? `<span class="badge mc" title="Modrinth modpack">📦 ${esc(s.pack.versionNumber || "")}</span>` : s.build ? `<span class="badge">${esc(s.build)}</span>` : ""}
             <span class="badge mono" title="Local connect address">localhost:${s.port}</span>
             <span id="srv-addr">${addrChipHTML(s.playit)}</span>
           </div>
@@ -741,7 +831,8 @@ async function renderServer(id) {
 
       <div class="tabs" id="tabs">
         <div class="tab" data-tab="console">Console</div>
-        <div class="tab" data-tab="files">Files &amp; Mods</div>
+        <div class="tab" data-tab="content">${esc(s.content ? s.content.noun : "Mods")}</div>
+        <div class="tab" data-tab="files">Files</div>
         <div class="tab" data-tab="properties">Properties</div>
         <div class="tab" data-tab="settings">Settings</div>
       </div>
@@ -752,7 +843,7 @@ async function renderServer(id) {
   renderEula(s);
   bindAddrChips();
   $$("#tabs .tab").forEach((t) => (t.onclick = () => selectTab(id, t.dataset.tab)));
-  selectTab(id, ["console", "files", "properties", "settings"].includes(state.activeTab) ? state.activeTab : "console");
+  selectTab(id, TABS.includes(state.activeTab) ? state.activeTab : "console");
 
   // live uptime ticker
   if (renderServer._timer) clearInterval(renderServer._timer);
@@ -807,11 +898,13 @@ async function serverAction(id, act) {
 }
 
 /* ------------------------------------------------------------- tab switching */
+const TABS = ["console", "content", "files", "properties", "settings"];
 function selectTab(id, tab) {
   state.activeTab = tab;
   $$("#tabs .tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === tab));
   closeConsoleStream();
   if (tab === "console") renderConsoleTab(id);
+  else if (tab === "content") renderContentTab(id);
   else if (tab === "files") renderFilesTab(id);
   else if (tab === "properties") renderPropertiesTab(id);
   else if (tab === "settings") renderSettingsTab(id);
@@ -921,7 +1014,9 @@ function patchServerLive(e) {
     const addr = $("#srv-addr");
     if (addr) { addr.innerHTML = addrChipHTML(s.playit); bindAddrChips(addr); }
     if ($("#st-playit")) renderServerPlayit(s.id);
-    if (s.status !== "installing") { const es = $("#eula-slot"); }
+    // The install finishing is what tells us which loader the server runs, so a
+    // content tab that was showing "still installing" can now do its job.
+    if (state.activeTab === "content" && s.content && !$("#md-list")) renderContentTab(s.id);
   }
   if (e.type === "stats") {
     const s = state.servers.get(e.id);
@@ -935,6 +1030,283 @@ function patchServerLive(e) {
   if (e.type === "install") {
     const out = $("#con-out"); if (out && state.activeTab === "console") appendConsole(out, "sys", e.line);
   }
+}
+
+/* =========================================================== MODRINTH TAB */
+/* Browse Modrinth and install straight into this server. What "content" means
+ * depends on the loader — the backend hands us {noun, folder, projectType,
+ * loaders} in the server summary, and every search here is scoped to it, so the
+ * results are things this server can actually load. */
+
+function fmtCount(n) {
+  if (n >= 1e6) return (n / 1e6).toFixed(n >= 1e7 ? 0 : 1) + "M";
+  if (n >= 1e3) return (n / 1e3).toFixed(n >= 1e4 ? 0 : 1) + "k";
+  return String(n);
+}
+
+// One search result. Shared by the modpack picker and the content browser.
+function projectRowHTML(p, selected, actions = "") {
+  return `
+    <div class="pk-row ${selected ? "sel" : ""}" data-id="${esc(p.id)}" data-slug="${esc(p.slug)}">
+      <span class="pk-icon">${p.icon ? `<img src="${esc(p.icon)}" alt="" loading="lazy" />` : "<span>📦</span>"}</span>
+      <div class="pk-meta">
+        <div class="pk-title">${esc(p.title)} <span class="pk-author">by ${esc(p.author)}</span></div>
+        <div class="pk-desc">${esc(p.description)}</div>
+        <div class="pk-tags">${(p.categories || []).map((c) => `<span class="tag">${esc(c)}</span>`).join("")}</div>
+      </div>
+      <div class="pk-side">
+        <div class="pk-dl"><b>${fmtCount(p.downloads)}</b><span>downloads</span></div>
+        ${actions}
+      </div>
+    </div>`;
+}
+
+const loaderQS = (content) => content.loaders.map((l) => "&loader=" + encodeURIComponent(l)).join("");
+
+async function renderContentTab(id) {
+  const s = state.servers.get(id);
+  const body = $("#tab-body");
+  const content = s.content;
+
+  if (!content) {
+    body.innerHTML = `<div class="banner warn">${
+      s.status === "installing"
+        ? "Still installing — the loader has to be in place before mods can be added."
+        : "This server has no completed install yet, so there's nowhere to put mods."
+    }</div>`;
+    return;
+  }
+
+  body.innerHTML = `
+    <div class="mods-head">
+      <div>
+        <h3>${esc(content.noun)} <span class="muted" id="md-count"></span></h3>
+        <p class="muted">Installed into <span class="mono">${esc(content.folder === "datapacks" ? "world/datapacks" : content.folder)}/</span> · ${esc(cap(content.loader))} · Minecraft ${esc(s.mc)}</p>
+      </div>
+      <button class="btn btn-sm" id="md-upd">↻ Check for updates</button>
+    </div>
+    <div id="md-installed"></div>
+
+    <div class="divider"></div>
+    <div class="mods-head">
+      <div>
+        <h3>Browse Modrinth</h3>
+        <p class="muted">Only ${esc(content.noun.toLowerCase())} that run on ${esc(cap(content.loader))} ${esc(s.mc)} are listed.</p>
+      </div>
+    </div>
+    <div class="pk-bar">
+      <input type="text" id="md-q" placeholder="Search ${esc(content.noun.toLowerCase())}…" autocomplete="off" />
+      <select id="md-sort" style="width:auto;min-width:150px">
+        ${[["relevance", "Best match"], ["downloads", "Most downloads"], ["follows", "Most followed"], ["updated", "Recently updated"]]
+          .map(([v, l]) => `<option value="${v}" ${v === "downloads" ? "selected" : ""}>${l}</option>`).join("")}
+      </select>
+      <label class="chk" title="Client-only mods do nothing on a server, and a few crash it"><input type="checkbox" id="md-srv" checked /> Server-compatible only</label>
+    </div>
+    <div class="pk-list" id="md-list"></div>
+    <div id="md-more" style="margin-top:12px"></div>`;
+
+  await loadInstalled(id);
+
+  let timer = null;
+  const q = $("#md-q");
+  q.oninput = () => { clearTimeout(timer); timer = setTimeout(() => browse(id, 0), 350); };
+  q.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); clearTimeout(timer); browse(id, 0); } };
+  $("#md-sort").onchange = () => browse(id, 0);
+  $("#md-srv").onchange = () => browse(id, 0);
+  $("#md-upd").onclick = () => checkUpdates(id);
+  browse(id, 0);
+}
+
+async function loadInstalled(id) {
+  const box = $("#md-installed");
+  if (!box) return;
+  let data;
+  try {
+    data = await API.get(`/api/servers/${id}/content`);
+  } catch (e) {
+    box.innerHTML = `<div class="banner err" style="margin:0">${esc(e.message)}</div>`;
+    return;
+  }
+  state.content = data;
+  const total = data.items.length + data.unmanaged.length;
+  const count = $("#md-count");
+  if (count) count.textContent = total ? `· ${total} installed` : "";
+
+  const packRow = data.pack
+    ? `<div class="file-row">
+         <span class="fic">📦</span>
+         <span class="fname"><b>${esc(data.pack.name)}</b> ${esc(data.pack.versionNumber || "")}
+           <span class="muted">modpack · ${data.pack.files} files installed with the server</span></span>
+         <a class="btn btn-sm btn-ghost" href="https://modrinth.com/modpack/${esc(data.pack.projectId || "")}" target="_blank" rel="noopener">View on Modrinth</a>
+       </div>`
+    : "";
+
+  const rows = data.items.map((it) => `
+    <div class="file-row md-item">
+      <span class="fic">${it.icon ? `<img class="md-ic" src="${esc(it.icon)}" alt="" loading="lazy" />` : "🧩"}</span>
+      <span class="fname">
+        <a href="https://modrinth.com/project/${esc(it.slug)}" target="_blank" rel="noopener">${esc(it.title)}</a>
+        <span class="muted">${esc(it.versionNumber || it.file.split("/").pop())}${it.fromPack ? " · from the modpack" : it.dependency ? " · dependency" : ""} · ${fmtBytes(it.size)}</span>
+      </span>
+      <span class="md-upd-slot" data-project="${esc(it.projectId)}"></span>
+      <span class="fdel" data-del="${esc(it.file)}" title="Remove">🗑</span>
+    </div>`).join("");
+
+  const loose = data.unmanaged.map((u) => `
+    <div class="file-row">
+      <span class="fic">📄</span>
+      <span class="fname">${esc(u.name)} <span class="muted">added by hand · ${fmtBytes(u.size)}</span></span>
+      <span class="fdel" data-del="${esc(u.file)}" title="Remove">🗑</span>
+    </div>`).join("");
+
+  box.innerHTML = packRow || rows || loose
+    ? `<div class="file-table">${packRow}${rows}${loose}</div>`
+    : `<div class="pk-empty">Nothing installed yet — search below to add some.</div>`;
+
+  $$("[data-del]", box).forEach((el) => (el.onclick = async () => {
+    const file = el.dataset.del;
+    if (!(await confirmDialog("Remove?",
+      `<p>Delete <b class="mono">${esc(file)}</b> from this server?</p>
+       <p class="muted">Anything that depends on it may stop working. Restart the server to apply.</p>`, "Remove"))) return;
+    try {
+      await API.del(`/api/servers/${id}/content?file=${encodeURIComponent(file)}`);
+      toast("Removed. Restart to apply.", "ok");
+      loadInstalled(id);
+    } catch (e) { toast(e.message, "err"); }
+  }));
+}
+
+async function browse(id, offset) {
+  const list = $("#md-list");
+  if (!list) return;
+  const s = state.servers.get(id);
+  const content = s.content;
+  const query = $("#md-q").value.trim();
+  const sort = $("#md-sort").value;
+  const serverOnly = $("#md-srv").checked ? "1" : "0";
+  if (!offset) list.innerHTML = `<div class="pk-empty"><span class="spinner"></span> Searching Modrinth…</div>`;
+
+  try {
+    const r = await API.get(
+      `/api/modrinth/search?type=${encodeURIComponent(content.projectType)}` +
+        `&mc=${encodeURIComponent(s.mc)}&q=${encodeURIComponent(query)}&sort=${encodeURIComponent(sort)}` +
+        `&server=${serverOnly}&offset=${offset}&limit=20${loaderQS(content)}`
+    );
+    const have = new Set(((state.content && state.content.items) || []).map((i) => i.projectId));
+    const html = r.hits
+      .map((h) => projectRowHTML(h, false, `
+        <div class="pk-actions">
+          <button class="btn btn-sm ${have.has(h.id) ? "" : "btn-primary"}" data-install="${esc(h.id)}">${have.has(h.id) ? "Reinstall" : "Install"}</button>
+          <button class="btn btn-sm btn-ghost btn-icon" data-versions="${esc(h.slug)}" title="Pick a specific version">⋯</button>
+        </div>`))
+      .join("");
+
+    if (!offset)
+      list.innerHTML = html || `<div class="pk-empty">Nothing on Modrinth matches that for ${esc(cap(content.loader))} ${esc(s.mc)}.</div>`;
+    else list.insertAdjacentHTML("beforeend", html);
+
+    const shown = offset + r.hits.length;
+    const more = $("#md-more");
+    more.innerHTML = shown < r.total
+      ? `<button class="btn btn-sm" id="md-more-btn">Load more (${shown} of ${r.total})</button>`
+      : r.total ? `<span class="muted" style="font-size:12px">${r.total} result${r.total === 1 ? "" : "s"}</span>` : "";
+    const mb = $("#md-more-btn");
+    if (mb) mb.onclick = () => { mb.disabled = true; mb.textContent = "Loading…"; browse(id, shown); };
+
+    bindBrowseActions(id, list);
+  } catch (e) {
+    list.innerHTML = `<div class="banner err" style="margin:0">Couldn't reach Modrinth: ${esc(e.message)}</div>`;
+  }
+}
+
+function bindBrowseActions(id, root) {
+  $$("[data-install]", root).forEach((b) => {
+    if (b._bound) return;
+    b._bound = true;
+    b.onclick = () => installContent(id, { projectId: b.dataset.install }, b);
+  });
+  $$("[data-versions]", root).forEach((b) => {
+    if (b._bound) return;
+    b._bound = true;
+    b.onclick = () => openVersionPicker(id, b.dataset.versions);
+  });
+}
+
+async function installContent(id, body, btn) {
+  const label = btn ? btn.textContent : "";
+  if (btn) { btn.disabled = true; btn.textContent = "Installing…"; }
+  try {
+    const out = await API.post(`/api/servers/${id}/content`, body);
+    const names = out.installed.map((i) => i.title);
+    toast(
+      `Installed ${names.slice(0, 2).join(", ")}${names.length > 2 ? ` +${names.length - 2} more` : ""}` +
+        (out.running ? " — restart to apply." : "."),
+      "ok"
+    );
+    if (btn) { btn.textContent = "Installed ✓"; btn.classList.remove("btn-primary"); }
+    await loadInstalled(id);
+  } catch (e) {
+    toast(e.message, "err");
+    if (btn) { btn.disabled = false; btn.textContent = label; }
+  }
+}
+
+// Pick an exact build instead of "whatever is newest" — what you want when a
+// pack, or a friend's client, pins one particular version.
+async function openVersionPicker(id, slug) {
+  const s = state.servers.get(id);
+  const content = s.content;
+  modal(`
+    <div class="modal-head"><h2>Choose a version</h2><button class="modal-close">×</button></div>
+    <div class="modal-body" id="vp-body"><div class="pk-empty"><span class="spinner"></span> Loading versions…</div></div>
+    <div class="modal-foot"><span class="muted mono" style="font-size:12px">${esc(slug)}</span><button class="btn btn-ghost" data-x>Close</button></div>`,
+    { wide: true });
+  $(".modal-close").onclick = $("[data-x]").onclick = closeModal;
+  try {
+    const { versions } = await API.get(
+      `/api/modrinth/versions?project=${encodeURIComponent(slug)}&mc=${encodeURIComponent(s.mc)}${loaderQS(content)}`
+    );
+    const b = $("#vp-body");
+    if (!b) return;
+    b.innerHTML = versions.length
+      ? `<div class="file-table">${versions.slice(0, 60).map((v) => `
+          <div class="file-row">
+            <span class="fic">${v.type === "release" ? "🟢" : v.type === "beta" ? "🟡" : "🔴"}</span>
+            <span class="fname">${esc(v.number)}
+              <span class="muted">${esc(v.name)} · ${esc(v.gameVersions.join(", "))} · ${fmtCount(v.downloads)} downloads</span></span>
+            <button class="btn btn-sm btn-primary" data-v="${esc(v.id)}">Install</button>
+          </div>`).join("")}</div>`
+      : `<div class="pk-empty">No builds of this project target ${esc(cap(content.loader))} ${esc(s.mc)}.</div>`;
+    $$("[data-v]", b).forEach((btn) => (btn.onclick = async () => {
+      await installContent(id, { versionId: btn.dataset.v }, btn);
+      closeModal();
+    }));
+  } catch (e) {
+    const b = $("#vp-body");
+    if (b) b.innerHTML = `<div class="banner err" style="margin:0">${esc(e.message)}</div>`;
+  }
+}
+
+async function checkUpdates(id) {
+  const btn = $("#md-upd");
+  btn.disabled = true;
+  btn.textContent = "↻ Checking…";
+  try {
+    const { updates } = await API.get(`/api/servers/${id}/content/updates`);
+    $$(".md-upd-slot").forEach((el) => (el.innerHTML = ""));
+    if (!updates.length) toast("Everything is up to date.", "ok");
+    for (const u of updates) {
+      const slot = $(`.md-upd-slot[data-project="${u.projectId}"]`);
+      if (!slot) continue;
+      slot.innerHTML = `<button class="btn btn-sm btn-primary" data-up="${esc(u.versionId)}" title="${esc(u.from)} → ${esc(u.to)}">Update to ${esc(u.to)}</button>`;
+      slot.firstElementChild.onclick = (ev) => installContent(id, { versionId: u.versionId }, ev.currentTarget);
+    }
+    if (updates.length) toast(`${updates.length} update${updates.length === 1 ? "" : "s"} available.`, "ok");
+  } catch (e) {
+    toast(e.message, "err");
+  }
+  btn.disabled = false;
+  btn.textContent = "↻ Check for updates";
 }
 
 /* ------------------------------------------------------------- files tab */
@@ -951,7 +1323,7 @@ async function renderFilesTab(id, dir = "") {
       </div>
     </div>
     <div class="file-table" id="fm-table"></div>
-    <p class="hint" style="margin-top:10px">Drop mods into <span class="mono">mods/</span>, plugins into <span class="mono">plugins/</span>, datapacks into <span class="mono">world/datapacks/</span>.</p>`;
+    <p class="hint" style="margin-top:10px">Drop mods into <span class="mono">mods/</span>, plugins into <span class="mono">plugins/</span>, datapacks into <span class="mono">world/datapacks/</span> — or install them from Modrinth in the previous tab.</p>`;
 
   await loadDir(id, dir);
   $("#fm-mkdir").onclick = async () => {

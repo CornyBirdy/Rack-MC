@@ -18,6 +18,7 @@ and streams the live console for. Zero npm dependencies — just Node.js.
 | **Quilt** | Fabric-compatible modloader | **mods** |
 | **Forge** | The classic modloader, biggest modpacks | **mods** |
 | **NeoForge** | Modern Forge fork (1.20.1+) | **mods** |
+| **Modrinth Modpack** | A curated pack that brings its own loader | **mods** |
 
 Version lists are fetched live from the official sources (Mojang, PaperMC's
 `fill` API, Purpur, FabricMC/QuiltMC meta, Forge & NeoForge Maven), so the
@@ -28,6 +29,60 @@ Minecraft's new year-based versioning (`26.1`, `26.1.2`, `26.2`) sits alongside
 the classic `1.x` line, and NeoForge encodes it in its own version number two
 different ways (`21.1.248` → MC 1.21.1, `26.1.2.99` → MC 26.1.2). The panel
 understands both, so every version shows up and sorts newest-first.
+
+## Modrinth built in
+
+The panel talks to [Modrinth](https://modrinth.com) directly, so mods, plugins,
+datapacks and whole modpacks install from inside it — no downloading jars by
+hand, no hunting for the build that matches your version. Nothing needs an
+account or an API key.
+
+### Install a modpack as a server
+
+Pick **Modrinth Modpack** in the create wizard and step 2 becomes a search over
+Modrinth's packs instead of the usual version dropdowns. Choose a pack, choose a
+version, and the panel:
+
+1. reads the pack's `modrinth.index.json`,
+2. installs the modloader the pack pins — Fabric, Quilt, Forge or NeoForge, at
+   the exact version it asks for, through the same install path a hand-built
+   server uses,
+3. downloads every file the pack lists (six at a time, each checked against its
+   published SHA-1), **skipping the client-only ones** so the server isn't
+   carrying mods that do nothing or crash it,
+4. and lays down the pack's `overrides/` and `server-overrides/` configs.
+
+`.mrpack` files are just zips, and `lib/zip.js` reads them with nothing but
+`zlib` — no shelling out to `tar` or `Expand-Archive`, and no path-traversal
+surprises from a hostile archive.
+
+### Mods / Plugins / Datapacks tab
+
+Every server gets a content tab, and what it offers follows the loader:
+
+| Server | Installs into | Searches for |
+|---|---|---|
+| Fabric / Quilt / Forge / NeoForge | `mods/` | mods for that loader (Quilt also gets Fabric mods) |
+| Paper / Purpur | `plugins/` | Bukkit / Spigot / Paper plugins |
+| Vanilla | `world/<level>/datapacks/` | datapacks |
+| Modrinth modpack | whatever its real loader uses | ditto |
+
+Searches are scoped to the loader **and** the Minecraft version, so results are
+things this server can actually load, and client-only projects are filtered out
+by default. **Install** takes the newest compatible build and pulls required
+dependencies with it; **⋯** opens the full version list when you need one exact
+build.
+
+The panel keeps a small manifest at `data/servers/<id>/.mchoster/modrinth.json`
+recording what it installed, which is what makes the tab able to list, update
+and remove things later. A modpack's own mods are recorded there too — by name,
+not filename — so you can update or drop individual mods out of a pack.
+**Check for updates** compares everything in one request (Modrinth answers for a
+whole folder of file hashes at once) and offers a one-click update per mod.
+Anything you dropped into `mods/` by hand still shows up, labelled as such.
+
+Content installs while the server is running are fine; the panel reminds you to
+restart to apply them.
 
 ## Run it
 
@@ -124,12 +179,15 @@ Details worth knowing:
 ## Using the panel
 
 - **Create Server** — pick a loader, a Minecraft version, (a loader build for
-  modded), then name / port / RAM. The panel downloads & installs, streaming
-  progress into the console.
+  modded), then name / port / RAM. Or pick **Modrinth Modpack** and search
+  Modrinth instead. The panel downloads & installs, streaming progress into the
+  console.
 - **Accept the EULA** — one click, required by Mojang before first start.
 - **Console** — live output, a command box (with ↑/↓ history), quick commands,
   and a live player list.
-- **Files & Mods** — browse the server folder, upload `.jar` mods/plugins, edit
+- **Mods / Plugins / Datapacks** — search Modrinth and install into this server
+  in one click, with dependencies; list, update and remove what's there.
+- **Files** — browse the server folder, upload `.jar` mods/plugins, edit
   text configs, make folders. Mods go in `mods/`, plugins in `plugins/`.
 - **Properties** — edit `server.properties` directly.
 - **Settings** — rename, change RAM/port/max-players, custom JVM args (Aikar's
@@ -160,6 +218,8 @@ MC_hoster/
 │  ├─ net.js            zero-dep HTTP client + downloader
 │  ├─ java.js           Java discovery, version matching, JRE downloads
 │  ├─ loaders.js        per-loader version lists + install logic
+│  ├─ modrinth.js       Modrinth search/install, content manifest, .mrpack packs
+│  ├─ zip.js            read-only zip reader (zlib only) for .mrpack files
 │  ├─ playit.js         playit.gg agent, account link, per-server tunnels
 │  ├─ manager.js        server lifecycle, console, players, stats
 │  ├─ sysmon.js         host CPU / RAM / disk sampling for the meters
@@ -167,6 +227,7 @@ MC_hoster/
 ├─ public/              the panel UI (index.html / style.css / app.js)
 ├─ data/                created at runtime — git-ignored, never travels
 │  ├─ servers/<id>/     each server's folder (world, jars, mods, configs)
+│  │  └─ .mchoster/     what the panel installed from Modrinth, for this server
 │  ├─ runtimes/         Java runtimes the panel downloaded for you
 │  └─ playit/           playit agent binary + your agent key
 ├─ rack.json            Rack manifest
