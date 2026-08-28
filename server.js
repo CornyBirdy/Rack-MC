@@ -349,10 +349,11 @@ const server = http.createServer(async (req, res) => {
       if (!action && req.method === "PATCH") {
         const body = await readJSONBody(req);
         const patch = {};
-        for (const k of ["name", "memory", "port", "maxPlayers", "javaPath", "jvmArgs", "icon", "pauseWhenEmpty"])
+        for (const k of ["name", "memory", "port", "maxPlayers", "javaPath", "jvmArgs", "icon", "pauseWhenEmpty", "sleepAfter"])
           if (k in body) patch[k] = body[k];
         store.update(id, patch);
         if ("pauseWhenEmpty" in patch) manager.applyPauseProperty(id);
+        if ("sleepAfter" in patch) manager.applySleepSetting(id);
         // The playit tunnel points at a fixed local port, so a port change has
         // to be pushed to the running agent.
         if ("port" in patch) playit.sync();

@@ -92,6 +92,8 @@ a { color: inherit; text-decoration: none; }
 .dot.running { background: var(--green); box-shadow: 0 0 8px var(--green); }
 .dot.starting, .dot.stopping, .dot.installing { background: var(--amber); box-shadow: 0 0 8px var(--amber); animation: pulse 1.2s infinite; }
 .dot.crashed, .dot.install-failed { background: var(--red); box-shadow: 0 0 8px var(--red); }
+.dot.paused { background: var(--blue); box-shadow: 0 0 8px rgba(74, 168, 255, 0.55); animation: breathe 3s ease-in-out infinite; }
+.dot.asleep { background: var(--accent-2); box-shadow: 0 0 6px rgba(139, 123, 240, 0.45); }
 @keyframes pulse { 50% { opacity: 0.35; } }
 
 .sidebar-foot { border-top: 1px solid var(--line); padding-top: 10px; display: flex; flex-direction: column; gap: 8px; }
@@ -158,6 +160,8 @@ a { color: inherit; text-decoration: none; }
 .pill.stopped { color: var(--muted); background: var(--panel-3); }
 .pill.starting, .pill.stopping, .pill.installing { color: var(--amber); background: rgba(217, 164, 65, 0.13); }
 .pill.crashed, .pill.install-failed { color: var(--red); background: rgba(240, 85, 106, 0.13); }
+.pill.paused { color: var(--blue); background: rgba(74, 168, 255, 0.13); }
+.pill.asleep { color: var(--accent-2); background: rgba(139, 123, 240, 0.14); }
 
 .srv-card-body { padding: 0 16px 14px; display: flex; gap: 14px; color: var(--muted); font-size: 12px; }
 .srv-card-body .stat b { color: var(--text); font-weight: 600; }
@@ -333,6 +337,7 @@ select { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmln
 .switch-row .txt { flex: 1; min-width: 0; }
 .switch-row .txt b { display: block; font-size: 13.5px; }
 .switch-row .txt span { font-size: 11.5px; color: var(--muted-2); }
+.switch-row .unit { font-size: 11.5px; color: var(--muted-2); flex-shrink: 0; margin-left: -4px; }
 .switch { position: relative; width: 42px; height: 24px; flex-shrink: 0; }
 .switch input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; z-index: 2; }
 .switch i {
@@ -475,3 +480,9 @@ select { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmln
 #md-installed .md-item:hover .fname > a,
 #md-installed .md-item:hover .fname > b { color: var(--accent-2); }
 .md-upd-slot:empty { display: none; }
+
+/* Idle servers breathe rather than blink — a pause is restful, not an alert. */
+@keyframes breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}

@@ -65,7 +65,21 @@ function fmtBytes(b) {
 const STATUS_LABEL = {
   running: "Online", stopped: "Offline", starting: "Starting", stopping: "Stopping",
   installing: "Installing", "install-failed": "Install failed", crashed: "Crashed",
+  paused: "Paused", asleep: "Sleeping",
 };
+
+// The two idle states ride alongside the real status rather than replacing it,
+// so buttons and stream handling still key off s.status while every indicator
+// paints the more useful one.
+function viewStatus(s) {
+  if (!s) return "stopped";
+  if (s.paused) return "paused";
+  if (s.asleep) return "asleep";
+  return s.status;
+}
+const statusLabel = (s) => STATUS_LABEL[viewStatus(s)] || viewStatus(s);
+// Online and paused both mean "the process is up" — worth a leading dot.
+const statusDot = (s) => (viewStatus(s) === "running" || viewStatus(s) === "paused" ? "● " : "");
 
 function toast(msg, kind = "") {
   const t = document.createElement("div");
@@ -207,7 +221,7 @@ function renderSidebar() {
           <div class="nm">${esc(s.name)}</div>
           <div class="sub">${esc(cap(s.loader))} · ${esc(s.mc || "")}</div>
         </div>
-        <span class="dot ${s.status}"></span>
+        <span class="dot ${viewStatus(s)}" title="${esc(statusLabel(s))}"></span>
       </div>`).join("") ||
     `<div class="players-empty" style="padding:8px 10px">No servers yet.</div>`;
   $$(".srv-mini", list).forEach((el) => (el.onclick = () => go("#/server/" + el.dataset.id)));
@@ -449,7 +463,7 @@ function cardHTML(s) {
             <span class="badge mc">${esc(s.mc || "—")}</span>
           </div>
         </div>
-        <span class="pill ${s.status}">${s.status === "running" ? "● " : ""}${STATUS_LABEL[s.status] || s.status}</span>
+        <span class="pill ${viewStatus(s)}">${statusDot(s)}${statusLabel(s)}</span>
       </div>
       <div class="srv-card-body">
         <div class="stat">RAM <b>${fmtMem(s.memory)}</b></div>
@@ -805,7 +819,7 @@ async function renderServer(id) {
         <div>
           <h1>${esc(s.name)}</h1>
           <div class="row">
-            <span class="pill ${s.status}" id="srv-pill">${s.status === "running" ? "● " : ""}${STATUS_LABEL[s.status] || s.status}</span>
+            <span class="pill ${viewStatus(s)}" id="srv-pill">${statusDot(s)}${statusLabel(s)}</span>
             <span class="badge loader">${esc(cap(s.loader))}</span>
             <span class="badge mc">${esc(s.mc || "")}</span>
             ${s.modLoader ? `<span class="badge loader">${esc(cap(s.modLoader))}</span>` : ""}
@@ -820,7 +834,7 @@ async function renderServer(id) {
       <div id="eula-slot"></div>
 
       <div class="statbar">
-        <div class="stat-tile"><span class="label">Status</span><span class="value" id="t-status">${STATUS_LABEL[s.status] || s.status}</span></div>
+        <div class="stat-tile"><span class="label">Status</span><span class="value" id="t-status">${statusLabel(s)}</span></div>
         <div class="stat-tile"><span class="label">Uptime</span><span class="value" id="t-uptime">${fmtUptime(s.startedAt ? Date.now() - s.startedAt : 0)}</span></div>
         <div class="stat-tile">
           <span class="label">Memory</span>
@@ -919,7 +933,7 @@ function renderConsoleTab(id) {
     <div class="console-wrap">
       <div class="console">
         <div class="console-head">
-          <span class="t"><span class="dot ${s.status}"></span> Console</span>
+          <span class="t"><span class="dot ${viewStatus(s)}"></span> Console</span>
           <button class="btn btn-sm btn-ghost" id="con-clear">Clear</button>
         </div>
         <div class="console-out" id="con-out"></div>
@@ -988,7 +1002,7 @@ function openConsoleStream(id, out) {
     else if (e.type === "status") {
       const s = state.servers.get(id); if (s) Object.assign(s, e);
       const inp = $("#con-in"); if (inp) inp.disabled = e.status !== "running";
-      const dot = $(".console-head .dot"); if (dot) dot.className = "dot " + e.status;
+      const dot = $(".console-head .dot"); if (dot) dot.className = "dot " + viewStatus(e);
     }
   };
   es.onerror = () => {};
@@ -1005,7 +1019,7 @@ function renderPlayers(s) {
     ? s.players
         .map((p) => `<div class="player"><span class="head">${esc(p[0].toUpperCase())}</span><span class="pname">${esc(p)}</span>${pingChip((s.pings || {})[p])}</div>`)
         .join("")
-    : `<div class="players-empty">${s.status === "running" ? "No one online." : "Server offline."}</div>`;
+    : `<div class="players-empty">${s.status === "running" ? "No one online." : s.asleep ? "Sleeping — start it to wake up." : "Server offline."}</div>`;
 }
 
 // Latency comes from the server's own `ping` command, which only Paper,
@@ -1022,8 +1036,8 @@ function patchServerLive(e) {
   if (e.type === "status") {
     const s = state.servers.get(e.id);
     renderActions(s); renderEula(s);
-    const pill = $("#srv-pill"); if (pill) { pill.className = "pill " + s.status; pill.textContent = (s.status === "running" ? "● " : "") + (STATUS_LABEL[s.status] || s.status); }
-    const ts = $("#t-status"); if (ts) ts.textContent = STATUS_LABEL[s.status] || s.status;
+    const pill = $("#srv-pill"); if (pill) { pill.className = "pill " + viewStatus(s); pill.textContent = statusDot(s) + statusLabel(s); }
+    const ts = $("#t-status"); if (ts) ts.textContent = statusLabel(s);
     const addr = $("#srv-addr");
     if (addr) { addr.innerHTML = addrChipHTML(s.playit); bindAddrChips(addr); }
     if ($("#st-playit")) renderServerPlayit(s.id);
@@ -1459,6 +1473,8 @@ async function renderSettingsTab(id) {
   const pauseOn = Number(def.pauseWhenEmpty) > 0;
   const pauseSecs = pauseOn ? Number(def.pauseWhenEmpty) : 60;
   const canPause = data.pauseSupported !== false;
+  const sleepOn = Number(def.sleepAfter) > 0;
+  const sleepMins = sleepOn ? Number(def.sleepAfter) : 30;
   const body = $("#tab-body");
   body.innerHTML = `
     <div style="max-width:620px">
@@ -1486,11 +1502,22 @@ async function renderSettingsTab(id) {
         <div class="switch-row">
           <label class="switch"><input type="checkbox" id="st-pause" ${pauseOn ? "checked" : ""} ${canPause ? "" : "disabled"} /><i></i></label>
           <div class="txt"><b>Pause while nobody is online</b><span>CPU drops to almost nothing. The server stays up and RAM stays reserved, so rejoining is instant.</span></div>
-          <input type="number" id="st-pause-secs" min="10" step="10" value="${pauseSecs}" style="width:88px" ${pauseOn && canPause ? "" : "disabled"} />
+          <input type="number" id="st-pause-secs" min="10" step="10" value="${pauseSecs}" style="width:72px" ${pauseOn && canPause ? "" : "disabled"} />
+          <span class="unit">sec</span>
         </div>
         <div class="hint">${canPause
           ? "Seconds of emptiness before pausing. Nothing ticks while paused — crops, furnaces, redstone and the daylight cycle all stop, including in spawn and force-loaded chunks."
           : `Minecraft ${esc(def.mc)} cannot pause — the setting arrived in 1.21.2.`}</div>
+      </div>
+      <div class="form-row">
+        <label>Deep sleep</label>
+        <div class="switch-row">
+          <label class="switch"><input type="checkbox" id="st-sleep" ${sleepOn ? "checked" : ""} /><i></i></label>
+          <div class="txt"><b>Shut down while nobody is online</b><span>Gives the RAM back to the machine. Works on every Minecraft version.</span></div>
+          <input type="number" id="st-sleep-mins" min="1" step="5" value="${sleepMins}" style="width:72px" ${sleepOn ? "" : "disabled"} />
+          <span class="unit">min</span>
+        </div>
+        <div class="hint">Minutes empty before the server stops itself. Waking it is a full boot — there is no wake-on-join yet, so someone has to press Start.</div>
       </div>
       <div style="display:flex;gap:10px;margin-top:8px"><button class="btn btn-primary" id="st-save">Save changes</button></div>
 
@@ -1507,6 +1534,7 @@ async function renderSettingsTab(id) {
     </div>`;
   const mem = $("#st-mem"); mem.oninput = () => ($("#st-memv").textContent = fmtMem(Number(mem.value)));
   const pauseSw = $("#st-pause"); pauseSw.onchange = () => ($("#st-pause-secs").disabled = !pauseSw.checked);
+  const sleepSw = $("#st-sleep"); sleepSw.onchange = () => ($("#st-sleep-mins").disabled = !sleepSw.checked);
   renderServerPlayit(id);
   $("#st-save").onclick = async () => {
     try {
@@ -1515,6 +1543,7 @@ async function renderSettingsTab(id) {
         port: Number($("#st-port").value), maxPlayers: Number($("#st-max").value),
         memory: Number(mem.value), jvmArgs: $("#st-jvm").value.trim(), javaPath: $("#st-java").value.trim() || null,
         pauseWhenEmpty: pauseSw.checked ? Number($("#st-pause-secs").value) || 60 : 0,
+        sleepAfter: sleepSw.checked ? Number($("#st-sleep-mins").value) || 30 : 0,
       });
       toast("Settings saved.", "ok");
       const fresh = await API.get(`/api/servers/${id}`); state.servers.set(id, fresh.server); renderServer(id);

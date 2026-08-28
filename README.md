@@ -191,8 +191,28 @@ Details worth knowing:
   text configs, make folders. Mods go in `mods/`, plugins in `plugins/`.
 - **Properties** — edit `server.properties` directly.
 - **Settings** — rename, change RAM/port/max-players, custom JVM args (Aikar's
-  flags), Java override, the **public address** switch, **sleep when empty**, or
-  delete the server.
+  flags), Java override, the **public address** switch, the two **sleep**
+  switches, or delete the server.
+
+## Letting idle servers rest
+
+Two independent switches, both off by default, for a server nobody is on.
+
+| | Sleep when empty | Deep sleep |
+|---|---|---|
+| What happens | Minecraft parks its tick loop | the panel stops the server |
+| CPU | ~0% | none — the process is gone |
+| **RAM** | **still reserved** | given back |
+| Getting back in | instant | a full boot |
+| Needs | Minecraft 1.21.2+ | any version |
+
+Run both and they ladder: the server pauses after seconds, then shuts down
+after minutes. The dashboard, the sidebar dots and the server page all show
+**Paused** and **Sleeping** as states of their own, so an idle server never
+looks the same as one you stopped by hand.
+
+There is **no wake-on-join yet** — a deep-slept server needs someone to press
+Start. Give modpacks a generous timer.
 
 ### Sleep when empty
 
@@ -209,6 +229,17 @@ Nothing ticks while paused — crops, furnaces, redstone, mob spawning and the
 daylight cycle all stop, **including in spawn chunks and force-loaded chunks**.
 Those are the only chunks that ran with nobody online in the first place, so if
 you keep an offline farm there, leave this off.
+
+### Deep sleep
+
+Set a number of minutes and the panel stops the server itself once it has been
+empty that long, freeing the RAM. It saves the world on the way out — this is
+the same graceful `stop` the Stop button sends, not a kill.
+
+The countdown is armed when the last player leaves and cancelled the moment
+someone joins, so a busy evening never trips it. A server that put itself to
+sleep is badged **Sleeping** rather than **Offline**; one you stopped yourself
+still reads **Offline**.
 
 ## System monitor
 
