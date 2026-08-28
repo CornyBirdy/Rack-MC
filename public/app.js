@@ -1620,19 +1620,405 @@ async function openFileEditor(id, path, name) {
 }
 
 /* ------------------------------------------------------- properties tab */
+/* server.properties gets a real form. The file on disk stays the source of
+ * truth: we parse it, draw one control per key, and write back only the keys
+ * that were actually touched, so comments, ordering and any keys we don't
+ * know about survive untouched. A raw editor is one click away. */
+
+const BOOL = "bool", INT = "int", TXT = "text", SEL = "sel", SECRET = "secret";
+
+const PROP_GROUPS = [
+  { title: "Gameplay", icon: "🎮", open: true, items: [
+    { k: "gamemode", n: "Default game mode", t: SEL, d: "survival", desc: "Mode new players join in.",
+      opts: [["survival", "Survival"], ["creative", "Creative"], ["adventure", "Adventure"], ["spectator", "Spectator"]] },
+    { k: "force-gamemode", n: "Force game mode", t: BOOL, d: "false", desc: "Put returning players back into the default mode on every join." },
+    { k: "difficulty", n: "Difficulty", t: SEL, d: "easy", desc: "Peaceful removes hostile mobs entirely.",
+      opts: [["peaceful", "Peaceful"], ["easy", "Easy"], ["normal", "Normal"], ["hard", "Hard"]] },
+    { k: "hardcore", n: "Hardcore", t: BOOL, d: "false", desc: "Death is permanent — players are switched to spectator. Locks difficulty to hard." },
+    { k: "pvp", n: "Player vs player", t: BOOL, d: "true", desc: "Let players damage each other directly." },
+    { k: "allow-flight", n: "Allow flight", t: BOOL, d: "false", desc: "Stops the anti-cheat kicking players who fly. Needed for most flight mods." },
+    { k: "enable-command-block", n: "Command blocks", t: BOOL, d: "false", desc: "Allow command blocks to be placed and run." },
+    { k: "spawn-protection", n: "Spawn protection", t: INT, d: "16", min: 0, max: 512, unit: "blocks", desc: "Radius around spawn only operators can build in. 0 disables it." },
+    { k: "player-idle-timeout", n: "Idle kick", t: INT, d: "0", min: 0, max: 1440, unit: "min", desc: "Kick players after this many idle minutes. 0 never kicks." },
+    { k: "op-permission-level", n: "Operator level", t: SEL, d: "4", desc: "How much power the /op command hands out.",
+      opts: [["1", "1 — bypass spawn protection"], ["2", "2 — singleplayer cheats"], ["3", "3 — player management"], ["4", "4 — full control"]] },
+    { k: "function-permission-level", n: "Function level", t: SEL, d: "2", desc: "Permission level datapack functions run at.",
+      opts: [["1", "1"], ["2", "2"], ["3", "3"], ["4", "4"]] },
+  ] },
+
+  { title: "Players & access", icon: "👥", open: true, items: [
+    { k: "motd", n: "Message of the day", t: TXT, d: "A Minecraft Server", wide: true, motd: true,
+      desc: "The line shown under the server name in the client's server list. §-codes colour it." },
+    { k: "max-players", n: "Max players", t: INT, d: "20", min: 1, max: 2000, desc: "Also editable in Settings, which keeps the panel's player counter in sync." },
+    { k: "online-mode", n: "Online mode", t: BOOL, d: "true", desc: "Verify every player against Mojang's servers. Turning this off lets anyone join under any name." },
+    { k: "white-list", n: "Whitelist", t: BOOL, d: "false", desc: "Only players on the whitelist may join. Manage it with /whitelist add." },
+    { k: "enforce-whitelist", n: "Enforce whitelist", t: BOOL, d: "false", desc: "Kick players already online the moment they fall off the whitelist." },
+    { k: "enforce-secure-profile", n: "Require signed chat", t: BOOL, d: "true", desc: "Reject players without a Mojang chat signing key." },
+    { k: "hide-online-players", n: "Hide player list", t: BOOL, d: "false", desc: "Don't reveal who is online in the server list ping." },
+  ] },
+
+  { title: "World", icon: "🌍", open: true, items: [
+    { k: "level-name", n: "World folder", t: TXT, d: "world", desc: "Folder the world lives in. A new name generates a fresh world." },
+    { k: "level-seed", n: "Seed", t: TXT, d: "", ph: "random", desc: "Only used the first time the world generates." },
+    { k: "level-type", n: "World type", t: SEL, d: "minecraft:normal", desc: "Terrain generator for a newly created world.",
+      opts: [["minecraft:normal", "Normal"], ["minecraft:flat", "Superflat"], ["minecraft:large_biomes", "Large biomes"],
+             ["minecraft:amplified", "Amplified"], ["minecraft:single_biome_surface", "Single biome"]] },
+    { k: "generate-structures", n: "Generate structures", t: BOOL, d: "true", desc: "Villages, temples, strongholds and the rest." },
+    { k: "allow-nether", n: "Allow the Nether", t: BOOL, d: "true", desc: "Off makes nether portals inert." },
+    { k: "spawn-monsters", n: "Spawn monsters", t: BOOL, d: "true", desc: "Hostile mobs. Difficulty peaceful overrides this." },
+    { k: "spawn-animals", n: "Spawn animals", t: BOOL, d: "true", desc: "Passive mobs like cows and sheep." },
+    { k: "spawn-npcs", n: "Spawn villagers", t: BOOL, d: "true", desc: "Villagers in generated villages." },
+    { k: "max-world-size", n: "World border", t: INT, d: "29999984", min: 1, max: 29999984, unit: "blocks", desc: "Maximum radius the world can be explored to." },
+    { k: "generator-settings", n: "Generator settings", t: TXT, d: "{}", desc: "JSON for superflat / single-biome layouts. Advanced." },
+    { k: "initial-enabled-packs", n: "Enabled datapacks", t: TXT, d: "vanilla", desc: "Packs switched on when the world is first created." },
+    { k: "initial-disabled-packs", n: "Disabled datapacks", t: TXT, d: "", desc: "Packs switched off when the world is first created." },
+  ] },
+
+  { title: "Performance", icon: "⚡", open: false, items: [
+    { k: "view-distance", n: "View distance", t: INT, d: "10", min: 2, max: 32, unit: "chunks", desc: "How far players can see. The single biggest lever on CPU and bandwidth." },
+    { k: "simulation-distance", n: "Simulation distance", t: INT, d: "10", min: 2, max: 32, unit: "chunks", desc: "How far entities, redstone and crops keep ticking." },
+    { k: "entity-broadcast-range-percentage", n: "Entity range", t: INT, d: "100", min: 10, max: 1000, unit: "%", desc: "Distance at which entities are sent to clients. Lower is lighter." },
+    { k: "max-tick-time", n: "Watchdog timeout", t: INT, d: "60000", min: -1, unit: "ms", desc: "Crash the server if a tick hangs this long. -1 disables the watchdog." },
+    { k: "pause-when-empty-seconds", n: "Pause when empty", t: INT, d: "60", min: -1, unit: "sec", desc: "Seconds of emptiness before the server stops ticking. The Settings tab's sleep switch writes this too." },
+    { k: "network-compression-threshold", n: "Compression threshold", t: INT, d: "256", min: -1, unit: "bytes", desc: "Compress packets above this size. -1 disables compression." },
+    { k: "sync-chunk-writes", n: "Sync chunk writes", t: BOOL, d: "true", desc: "Flush chunks to disk immediately. Off is faster but riskier on a crash." },
+    { k: "max-chained-neighbor-updates", n: "Chained block updates", t: INT, d: "1000000", desc: "Cap on consecutive neighbour updates before the rest are dropped." },
+    { k: "region-file-compression", n: "Region compression", t: SEL, d: "deflate", desc: "Trade disk space against CPU when saving regions.",
+      opts: [["deflate", "Deflate — smallest"], ["lz4", "LZ4 — fastest"], ["none", "None"]] },
+    { k: "use-native-transport", n: "Native transport", t: BOOL, d: "true", desc: "Linux-only optimised networking. Ignored elsewhere." },
+  ] },
+
+  { title: "Resource pack", icon: "📦", open: false, items: [
+    { k: "resource-pack", n: "Pack URL", t: TXT, d: "", ph: "https://…", desc: "Direct download link to a .zip resource pack." },
+    { k: "resource-pack-sha1", n: "Pack SHA-1", t: TXT, d: "", desc: "Checksum of the zip. Without it clients re-download every join." },
+    { k: "require-resource-pack", n: "Require the pack", t: BOOL, d: "false", desc: "Kick players who decline it." },
+    { k: "resource-pack-prompt", n: "Prompt text", t: TXT, d: "", wide: true, desc: "JSON chat component shown in the accept dialog." },
+    { k: "resource-pack-id", n: "Pack UUID", t: TXT, d: "", desc: "Optional UUID identifying the pack." },
+  ] },
+
+  { title: "Network & remote access", icon: "🌐", open: false, items: [
+    { k: "server-port", n: "Game port", t: INT, d: "25565", min: 1, max: 65535, desc: "Port Minecraft listens on. Settings changes this too, and keeps the panel in sync." },
+    { k: "server-ip", n: "Bind address", t: TXT, d: "", ph: "all interfaces", desc: "Leave blank unless the machine has several addresses." },
+    { k: "enable-status", n: "Answer server pings", t: BOOL, d: "true", desc: "Off hides the server from the client's list — it still accepts joins." },
+    { k: "prevent-proxy-connections", n: "Block proxies", t: BOOL, d: "false", desc: "Refuse players whose Mojang-reported region doesn't match their IP." },
+    { k: "accepts-transfers", n: "Accept transfers", t: BOOL, d: "false", desc: "Allow players transferred here from another server." },
+    { k: "rate-limit", n: "Packet rate limit", t: INT, d: "0", min: 0, unit: "pkt/s", desc: "Kick players who exceed this. 0 is unlimited." },
+    { k: "log-ips", n: "Log IP addresses", t: BOOL, d: "true", desc: "Write player IPs to the console and log files." },
+    { k: "broadcast-console-to-ops", n: "Echo console to ops", t: BOOL, d: "true", desc: "Show commands run from the console to online operators." },
+    { k: "enable-query", n: "GameSpy query", t: BOOL, d: "false", desc: "Expose player counts and mods to query tools." },
+    { k: "query.port", n: "Query port", t: INT, d: "25565", min: 1, max: 65535 },
+    { k: "enable-rcon", n: "RCON", t: BOOL, d: "false", desc: "Remote console access. Only enable with a strong password." },
+    { k: "rcon.port", n: "RCON port", t: INT, d: "25575", min: 1, max: 65535 },
+    { k: "rcon.password", n: "RCON password", t: SECRET, d: "", desc: "Stored in plain text in server.properties." },
+    { k: "broadcast-rcon-to-ops", n: "Echo RCON to ops", t: BOOL, d: "true", desc: "Show RCON commands to online operators." },
+  ] },
+
+  { title: "Advanced", icon: "🧪", open: false, items: [
+    { k: "enable-jmx-monitoring", n: "JMX monitoring", t: BOOL, d: "false", desc: "Expose tick metrics over JMX." },
+    { k: "debug", n: "Debug mode", t: BOOL, d: "false", desc: "Very verbose logging." },
+    { k: "bug-report-link", n: "Bug report link", t: TXT, d: "", ph: "https://…", desc: "URL offered to players on a crash." },
+    { k: "text-filtering-config", n: "Text filter config", t: TXT, d: "", desc: "Endpoint for chat filtering. Rarely used." },
+    { k: "text-filtering-version", n: "Text filter version", t: INT, d: "0", min: 0 },
+  ] },
+];
+
+const PROP_INDEX = new Map();
+for (const g of PROP_GROUPS) for (const it of g.items) PROP_INDEX.set(it.k, it);
+
+function parseProps(text) {
+  const out = {};
+  for (const line of String(text || "").split(/\r?\n/)) {
+    const m = /^\s*([\w.-]+)\s*=(.*)$/.exec(line);
+    if (m) out[m[1]] = m[2];
+  }
+  return out;
+}
+
+// server.properties is a Java properties file, so Minecraft escapes colons and
+// non-ASCII on write. Show the human form in the inputs; we write values back
+// plainly, which the loader is equally happy with.
+function propUnesc(v) {
+  return String(v ?? "")
+    .replace(/\\u([0-9a-fA-F]{4})/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
+    .replace(/\\([:=\\])/g, "$1");
+}
+
+// Rebuild the file with `changes` merged in, leaving every other line — blank
+// lines, comments, keys we know nothing about — exactly where it was.
+function serializeProps(text, changes) {
+  const lines = String(text || "").split(/\r?\n/);
+  const seen = new Set();
+  const out = lines.map((line) => {
+    const m = /^([\w.-]+)\s*=(.*)$/.exec(line);
+    if (m && changes[m[1]] !== undefined) { seen.add(m[1]); return `${m[1]}=${changes[m[1]]}`; }
+    return line;
+  });
+  while (out.length && !out[out.length - 1].trim()) out.pop();
+  for (const [k, v] of Object.entries(changes)) if (!seen.has(k)) out.push(`${k}=${v}`);
+  const body = out.join("\n").replace(/^\n+|\n+$/g, "");
+  return body ? body + "\n" : "";
+}
+
+const MC_COLORS = { 0: "#000000", 1: "#0000aa", 2: "#00aa00", 3: "#00aaaa", 4: "#aa0000", 5: "#aa00aa",
+  6: "#ffaa00", 7: "#aaaaaa", 8: "#555555", 9: "#5555ff", a: "#55ff55", b: "#55ffff", c: "#ff5555",
+  d: "#ff55ff", e: "#ffff55", f: "#ffffff" };
+
+// Render §-codes the way the client's server list does, so the motd can be
+// tuned without alt-tabbing into Minecraft.
+function motdPreviewHTML(raw) {
+  const src = String(raw || "").replace(/\\n/g, "\n");
+  let st = { color: "", b: false, i: false, u: false, s: false };
+  let html = "", buf = "";
+  const flush = () => {
+    if (!buf) return;
+    const css = [st.color ? `color:${st.color}` : "", st.b ? "font-weight:700" : "", st.i ? "font-style:italic" : "",
+      st.u || st.s ? `text-decoration:${[st.u ? "underline" : "", st.s ? "line-through" : ""].filter(Boolean).join(" ")}` : ""]
+      .filter(Boolean).join(";");
+    html += `<span style="${css}">${esc(buf)}</span>`;
+    buf = "";
+  };
+  for (let i = 0; i < src.length; i++) {
+    const ch = src[i];
+    if (ch === "\n") { flush(); html += "<br>"; continue; }
+    if (ch !== "§" || i === src.length - 1) { buf += ch; continue; }
+    const code = src[++i].toLowerCase();
+    flush();
+    if (MC_COLORS[code]) st = { color: MC_COLORS[code], b: false, i: false, u: false, s: false };
+    else if (code === "l") st.b = true;
+    else if (code === "o") st.i = true;
+    else if (code === "n") st.u = true;
+    else if (code === "m") st.s = true;
+    else if (code === "r") st = { color: "", b: false, i: false, u: false, s: false };
+  }
+  flush();
+  return html || `<span class="muted">—</span>`;
+}
+
 async function renderPropertiesTab(id) {
   const body = $("#tab-body");
-  body.innerHTML = `<div class="banner warn" style="margin-bottom:16px">Editing <span class="mono">server.properties</span>. Changes apply on next start (or restart).</div>
-    <textarea id="props-area" style="height:52vh;min-height:340px" spellcheck="false"></textarea>
-    <div style="margin-top:14px;display:flex;gap:10px"><button class="btn btn-primary" id="props-save">Save properties</button></div>`;
+  body.innerHTML = `<div class="muted" style="padding:24px 2px"><span class="spinner"></span> Reading server.properties…</div>`;
+  let text, def;
   try {
-    const { text } = await API.get(`/api/servers/${id}/properties`);
-    $("#props-area").value = text || "# server.properties will be generated after first start\n";
-  } catch (e) { $("#props-area").value = "# " + e.message; }
-  $("#props-save").onclick = async () => {
-    try { await API.put(`/api/servers/${id}/properties`, { text: $("#props-area").value }); toast("Saved.", "ok"); }
-    catch (e) { toast(e.message, "err"); }
+    const [p, d] = await Promise.all([API.get(`/api/servers/${id}/properties`), API.get(`/api/servers/${id}`)]);
+    text = p.text || "";
+    def = d.def || {};
+  } catch (e) {
+    body.innerHTML = `<div class="banner err">Couldn't read server.properties — ${esc(e.message)}</div>`;
+    return;
+  }
+  if (state.route.id !== id || state.activeTab !== "properties") return;
+  drawProperties(id, text, def);
+}
+
+function drawProperties(id, text, def) {
+  const body = $("#tab-body");
+
+
+  // Nothing on disk yet: Minecraft writes the file on its first run. Show the
+  // vanilla defaults, with this server's own port and slots filled in, and let
+  // Save create the file up front.
+  const fresh = !text.trim();
+  const onDisk = parseProps(text);
+  const start = {};
+  if (fresh) {
+    for (const [k, it] of PROP_INDEX) start[k] = it.d;
+    if (def.port) start["server-port"] = start["query.port"] = String(def.port);
+    if (def.maxPlayers) start["max-players"] = String(def.maxPlayers);
+    if (def.name) start["motd"] = `${def.name} — powered by MC Hoster`;
+  }
+  Object.assign(start, onDisk);
+
+  const cur = { ...start };
+  const extras = Object.keys(onDisk).filter((k) => !PROP_INDEX.has(k)).sort();
+  let rawMode = false;
+
+  const isDirty = (k) => cur[k] !== start[k];
+  const dirtyKeys = () => Object.keys(cur).filter(isDirty);
+
+  const ctlHTML = (it, val) => {
+    const v = propUnesc(val);
+    if (it.t === BOOL) {
+      const on = /^true$/i.test(String(val).trim());
+      return `<label class="switch"><input type="checkbox" data-k="${esc(it.k)}" ${on ? "checked" : ""} /><i></i></label>`;
+    }
+    if (it.t === SEL) {
+      const opts = it.opts.slice();
+      if (!opts.some(([o]) => o === val)) opts.push([val, `${val} (from file)`]);
+      return `<select data-k="${esc(it.k)}">${opts.map(([o, lbl]) =>
+        `<option value="${esc(o)}" ${o === val ? "selected" : ""}>${esc(lbl)}</option>`).join("")}</select>`;
+    }
+    if (it.t === INT) {
+      return `<input type="number" data-k="${esc(it.k)}" value="${esc(v)}"
+        ${it.min !== undefined ? `min="${it.min}"` : ""} ${it.max !== undefined ? `max="${it.max}"` : ""} />
+        ${it.unit ? `<span class="unit">${esc(it.unit)}</span>` : ""}`;
+    }
+    if (it.t === SECRET) {
+      return `<input type="password" data-k="${esc(it.k)}" value="${esc(v)}" autocomplete="new-password" />
+        <button class="btn btn-ghost btn-sm prop-eye" data-eye="${esc(it.k)}" title="Show">👁</button>`;
+    }
+    return `<input type="text" data-k="${esc(it.k)}" ${it.mono ? 'class="mono"' : ""} value="${esc(v)}" placeholder="${esc(it.ph || "")}" />`;
   };
+
+  const rowHTML = (it) => {
+    const missing = cur[it.k] === undefined;
+    return `<div class="prop${it.wide ? " wide" : ""}" data-row="${esc(it.k)}"
+        data-find="${esc((it.k + " " + it.n + " " + (it.desc || "")).toLowerCase())}">
+      <div class="prop-txt">
+        <b>${esc(it.n)}<span class="dot" title="Unsaved change">●</span></b>
+        <span class="k">${esc(it.k)}</span>${missing ? `<span class="k miss">not in file</span>` : ""}
+        ${it.desc ? `<span class="d">${esc(it.desc)}</span>` : ""}
+      </div>
+      <div class="prop-ctl">
+        ${ctlHTML(it, missing ? it.d : cur[it.k])}
+        <button class="btn btn-ghost btn-sm prop-undo" data-undo="${esc(it.k)}" title="Undo this change">↺</button>
+      </div>
+      ${it.motd ? `<div class="motd-prev"><span class="tag">in-game</span><div class="motd-txt" id="motd-prev"></div></div>` : ""}
+    </div>`;
+  };
+
+  const groupHTML = (g, items, note) => `
+    <details class="prop-group" ${g.open ? "open" : ""} data-group>
+      <summary><span class="gi">${g.icon}</span><span class="gt">${esc(g.title)}</span>
+        <span class="gcount">${items.length}</span><span class="caret">▸</span></summary>
+      <div class="prop-list">${note || ""}${items.map(rowHTML).join("")}</div>
+    </details>`;
+
+  const guessType = (v) => /^(true|false)$/i.test(String(v).trim()) ? BOOL : TXT;
+  const extraItems = extras.map((k) => ({ k, n: k, t: guessType(onDisk[k]), d: "", mono: true }));
+
+  body.innerHTML = `
+    <div class="prop-bar">
+      <input type="text" id="prop-search" placeholder="Search settings…" autocomplete="off" />
+      <span class="prop-count" id="prop-count"></span>
+      <button class="btn btn-sm" id="prop-raw">📄 Raw file</button>
+      <button class="btn btn-sm btn-ghost" id="prop-undo-all" disabled>Discard</button>
+      <button class="btn btn-sm btn-primary" id="prop-save" disabled>Save</button>
+    </div>
+    ${fresh
+      ? `<div class="banner warn">This server hasn't generated its <span class="mono">server.properties</span> yet — these are the defaults. Saving writes the file now; Minecraft fills in anything missing on first start.</div>`
+      : `<div class="prop-hint">Changes are written to <span class="mono">server.properties</span> and apply on the next start or restart.</div>`}
+    <div id="prop-form">
+      ${PROP_GROUPS.map((g) => groupHTML(g, g.items)).join("")}
+      ${extraItems.length
+        ? groupHTML({ title: "Other keys in this file", icon: "🗂", open: false }, extraItems,
+            `<div class="prop-note">Keys this panel doesn't know — usually written by a mod or an older Minecraft version. Edited as plain text.</div>`)
+        : ""}
+    </div>
+    <div id="prop-raw-box" style="display:none">
+      <textarea id="prop-raw-area" style="height:56vh;min-height:340px" spellcheck="false"></textarea>
+    </div>`;
+
+  const form = $("#prop-form"), rawBox = $("#prop-raw-box"), rawArea = $("#prop-raw-area");
+  const saveBtn = $("#prop-save"), undoAllBtn = $("#prop-undo-all"), countEl = $("#prop-count");
+  const search = $("#prop-search");
+
+  const readCtl = (el) => {
+    if (el.type === "checkbox") return el.checked ? "true" : "false";
+    if (el.type !== "number") return el.value;
+    const it = PROP_INDEX.get(el.dataset.k) || {};
+    let n = Number(el.value);
+    if (el.value === "" || !Number.isFinite(n)) return it.d ?? "";
+    if (it.min !== undefined) n = Math.max(it.min, n);
+    if (it.max !== undefined) n = Math.min(it.max, n);
+    return String(Math.trunc(n));
+  };
+
+  const paintRow = (k) => {
+    const row = form.querySelector(`[data-row="${CSS.escape(k)}"]`);
+    if (!row) return;
+    const dirty = isDirty(k);
+    row.classList.toggle("dirty", dirty);
+    const undo = $(".prop-undo", row);
+    if (undo) undo.style.visibility = dirty ? "visible" : "hidden";
+  };
+
+  function refresh() {
+    const n = dirtyKeys().length;
+    saveBtn.disabled = !(n || fresh);
+    undoAllBtn.disabled = !n;
+    saveBtn.textContent = fresh ? "Create file" : n ? `Save ${n} change${n === 1 ? "" : "s"}` : "Save";
+    countEl.textContent = n ? `${n} unsaved` : "";
+    const prev = $("#motd-prev"), motdIn = form.querySelector('[data-k="motd"]');
+    if (prev) prev.innerHTML = motdPreviewHTML(motdIn ? motdIn.value : cur["motd"]);
+  }
+
+  $$("[data-k]", form).forEach((el) => {
+    const k = el.dataset.k;
+    const on = () => { cur[k] = readCtl(el); paintRow(k); refresh(); };
+    el.oninput = on;
+    el.onchange = on;
+    // Clamping happens on read, so echo the clamped number back once the field
+    // is done being typed in — otherwise the box and the file disagree.
+    if (el.type === "number") el.onblur = () => { el.value = cur[k]; };
+  });
+
+  $$("[data-undo]", form).forEach((b) => (b.onclick = () => {
+    const k = b.dataset.undo, el = form.querySelector(`[data-k="${CSS.escape(k)}"]`);
+    cur[k] = start[k];
+    const back = start[k] !== undefined ? start[k] : (PROP_INDEX.get(k) || {}).d || "";
+    if (el.type === "checkbox") el.checked = /^true$/i.test(String(back).trim());
+    else el.value = propUnesc(back);
+    paintRow(k); refresh();
+  }));
+
+  $$("[data-eye]", form).forEach((b) => (b.onclick = () => {
+    const el = form.querySelector(`[data-k="${CSS.escape(b.dataset.eye)}"]`);
+    el.type = el.type === "password" ? "text" : "password";
+    b.classList.toggle("on", el.type === "text");
+  }));
+
+  search.oninput = () => {
+    const q = search.value.trim().toLowerCase();
+    $$("[data-group]", form).forEach((g) => {
+      let hits = 0;
+      $$("[data-row]", g).forEach((r) => {
+        const show = !q || r.dataset.find.includes(q);
+        r.style.display = show ? "" : "none";
+        if (show) hits++;
+      });
+      g.style.display = hits ? "" : "none";
+      if (q) g.open = true;
+      $(".gcount", g).textContent = hits;
+    });
+  };
+
+  // Everything the form would write, as the finished file.
+  function pending() {
+    const changes = {};
+    for (const k of (fresh ? Object.keys(cur) : dirtyKeys())) changes[k] = cur[k];
+    return serializeProps(fresh ? "#Minecraft server properties" : text, changes);
+  }
+
+  $("#prop-raw").onclick = () => {
+    rawMode = !rawMode;
+    if (rawMode) {
+      rawArea.value = pending();
+      form.style.display = "none";
+      rawBox.style.display = "";
+      $("#prop-raw").textContent = "🎛 Form";
+      search.disabled = true;
+      saveBtn.disabled = false;
+      saveBtn.textContent = "Save file";
+    } else {
+      drawProperties(id, rawArea.value, def); // reparse whatever the text now says
+    }
+  };
+
+  saveBtn.onclick = async () => {
+    const out = rawMode ? rawArea.value : pending();
+    saveBtn.disabled = true;
+    try {
+      await API.put(`/api/servers/${id}/properties`, { text: out });
+      const s = state.servers.get(id);
+      toast(s && s.status === "running" ? "Saved — restart to apply." : "Saved.", "ok");
+      renderPropertiesTab(id);
+    } catch (e) { saveBtn.disabled = false; toast(e.message, "err"); }
+  };
+
+  undoAllBtn.onclick = () => drawProperties(id, text, def);
+
+  $$("[data-row]", form).forEach((r) => paintRow(r.dataset.row));
+  refresh();
 }
 
 /* -------------------------------------------------------------- settings tab */
