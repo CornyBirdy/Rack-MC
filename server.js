@@ -17,6 +17,7 @@ const manager = require("./lib/manager");
 const java = require("./lib/java");
 const playit = require("./lib/playit");
 const sysmon = require("./lib/sysmon");
+const changelog = require("./lib/changelog");
 const modrinth = require("./lib/modrinth");
 
 // Port precedence: explicit flag, then the launcher's MC_PORT (our portEnv),
@@ -185,12 +186,16 @@ const server = http.createServer(async (req, res) => {
 
   if (parts[0] === "api") {
     // ---- meta / bootstrap ----
+    if (p === "/api/changelog" && req.method === "GET")
+      return sendJSON(res, 200, changelog.full());
+
     if (p === "/api/bootstrap" && req.method === "GET") {
       const { javas } = await java.discover();
       return sendJSON(res, 200, {
         loaders: loaders.list(),
         settings: store.getSettings(),
         defaults: { quickCommands: store.DEFAULT_QUICK_COMMANDS },
+        build: changelog.stamp(),
         javas,
         playit: playit.snapshot(),
         sys: sysmon.snapshot(),

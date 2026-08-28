@@ -31,6 +31,7 @@ const state = {
   javas: [],
   settings: {},
   defaults: { quickCommands: [] }, // stock values the backend ships, for "reset"
+  build: null, // { version, commit } — what this checkout is
   playit: { supported: false, linked: false, agent: "stopped" },
   sys: null, // latest host resource sample (see sysmon.js)
   servers: new Map(), // id -> summary
@@ -110,6 +111,92 @@ function modal(html, { wide = false } = {}) {
 }
 function closeModal() { $("#modal-root").innerHTML = ""; }
 
+/* ------------------------------------------------------------- build badge */
+/*
+ * The panel has no version number — it is deployed by pulling main — so the
+ * "version" is the newest heading in CHANGELOG.md, with the commit alongside it
+ * as the exact build. Clicking the badge opens the changelog itself.
+ */
+function renderBuildBadge() {
+  const el = $("#build-badge");
+  if (!el) return;
+  const b = state.build || {};
+  if (!b.version && !b.commit) return; // no changelog and no .git — say nothing
+  el.hidden = false;
+  el.innerHTML =
+    `<span class="bb-dot"></span>` +
+    (b.version ? `<span>${esc(b.version)}</span>` : "") +
+    (b.commit ? `<span class="bb-commit">${esc(b.commit)}</span>` : "");
+  el.title =
+    `MC Hoster${b.version ? " — " + b.version : ""}${b.commit ? " (" + b.commit + ")" : ""}` +
+    `\nClick for the changelog`;
+  el.onclick = openChangelog;
+}
+
+async function openChangelog() {
+  modal(
+    `<div class="modal-head"><h2>📋 Changelog</h2><button class="modal-close">×</button></div>
+     <div class="modal-body"><div class="cl" id="cl-body"><p class="muted"><span class="spinner"></span> Loading…</p></div></div>
+     <div class="modal-foot"><span class="muted" id="cl-build"></span><button class="btn btn-primary" data-x>Close</button></div>`,
+    { wide: true }
+  );
+  $(".modal-close").onclick = $("[data-x]").onclick = closeModal;
+  try {
+    const c = await API.get("/api/changelog");
+    const body = $("#cl-body");
+    if (!body) return; // the modal was closed while we were fetching
+    body.innerHTML = c.text ? mdToHTML(c.text) : `<p class="muted">No CHANGELOG.md in this checkout.</p>`;
+    // Flag the newest entry as the one this checkout is actually running.
+    const first = $(".cl h2", body);
+    if (first && c.version) first.innerHTML += ` <span class="cl-current">— you are here</span>`;
+    const foot = $("#cl-build");
+    if (foot) foot.textContent = c.commit ? `commit ${c.commit}` : "";
+  } catch (e) {
+    const body = $("#cl-body");
+    if (body) body.innerHTML = `<p class="muted">Couldn't load the changelog: ${esc(e.message)}</p>`;
+  }
+}
+
+/*
+ * Just enough Markdown for CHANGELOG.md: headings, bullet lists, paragraphs,
+ * bold, inline code and links. Everything is escaped up front, so the inline
+ * pass only ever sees text — no HTML from the file can reach the page.
+ */
+function mdToHTML(md) {
+  const inline = (s) =>
+    esc(s)
+      .replace(/`([^`]+)`/g, "<code>$1</code>")
+      .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+      .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+
+  const out = [];
+  let list = null; // items of the <ul> being built
+  let para = null; // lines of the <p> being built
+
+  const flushList = () => { if (list) { out.push(`<ul>${list.join("")}</ul>`); list = null; } };
+  const flushPara = () => { if (para) { out.push(`<p>${inline(para.join(" "))}</p>`); para = null; } };
+  const flush = () => { flushList(); flushPara(); };
+
+  for (const raw of md.split("\n")) {
+    const line = raw.replace(/\s+$/, "");
+    const h = /^(#{1,4})\s+(.*)$/.exec(line);
+    if (h) { flush(); out.push(`<h${h[1].length}>${inline(h[2])}</h${h[1].length}>`); continue; }
+    const li = /^\s*[-*]\s+(.*)$/.exec(line);
+    if (li) { flushPara(); (list = list || []).push(`<li>${inline(li[1])}</li>`); continue; }
+    if (!line.trim()) { flush(); continue; }
+    // An indented line under a bullet continues it rather than starting a paragraph.
+    if (list && /^\s+\S/.test(raw)) {
+      list[list.length - 1] = list[list.length - 1].replace(/<\/li>$/, " " + inline(line.trim()) + "</li>");
+      continue;
+    }
+    flushList();
+    (para = para || []).push(line.trim());
+  }
+  flush();
+  return out.join("");
+}
+
+
 async function confirmDialog(title, body, okText = "Confirm", danger = true) {
   return new Promise((resolve) => {
     modal(`
@@ -132,6 +219,7 @@ async function boot() {
     state.javas = b.javas;
     state.settings = b.settings;
     state.defaults = b.defaults || state.defaults;
+    state.build = b.build || null;
     state.playit = b.playit || state.playit;
     state.sys = b.sys || null;
     b.servers.forEach((s) => state.servers.set(s.id, s));
@@ -140,6 +228,7 @@ async function boot() {
     return;
   }
   renderSidebar();
+  renderBuildBadge();
   initSysmon();
   openGlobalStream();
   window.addEventListener("hashchange", route);

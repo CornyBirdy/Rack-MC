@@ -49,6 +49,12 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   booted yet shows the vanilla defaults with its own port and slots filled in,
   and saving writes the file early. The old textarea is still there behind a
   **Raw file** toggle.
+- **Build badge and in-panel changelog.** A small pill in the bottom-right
+  corner shows what this checkout is — the newest changelog heading, plus the
+  commit read straight out of `.git` — and clicking it opens this file in a
+  modal, rendered. There is no version number to show because the panel is
+  deployed by pulling `main`, so the date and the commit are the honest
+  answer to "what am I running".
 - `worktree.bat`, for giving each parallel session its own checkout.
 
 ### Fixed
