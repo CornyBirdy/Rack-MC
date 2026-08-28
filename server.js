@@ -349,11 +349,13 @@ const server = http.createServer(async (req, res) => {
       if (!action && req.method === "PATCH") {
         const body = await readJSONBody(req);
         const patch = {};
-        for (const k of ["name", "memory", "port", "maxPlayers", "javaPath", "jvmArgs", "icon", "pauseWhenEmpty", "sleepAfter"])
+        for (const k of ["name", "memory", "port", "maxPlayers", "javaPath", "jvmArgs", "icon", "pauseWhenEmpty", "sleepAfter", "wakeOnJoin"])
           if (k in body) patch[k] = body[k];
         store.update(id, patch);
         if ("pauseWhenEmpty" in patch) manager.applyPauseProperty(id);
         if ("sleepAfter" in patch) manager.applySleepSetting(id);
+        if ("wakeOnJoin" in patch || "port" in patch || "name" in patch)
+          manager.applyWakeSetting(id).catch(() => {});
         // The playit tunnel points at a fixed local port, so a port change has
         // to be pushed to the running agent.
         if ("port" in patch) playit.sync();
@@ -493,6 +495,7 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, () => {
   const url = `http://localhost:${PORT}`;
   console.log(`MC Hoster running at ${url}  (${store.all().length} server(s) configured)`);
+  manager.initWake(); // stopped servers that want waking need their port held
   // Only auto-open a browser when launched standalone. Rack captures this
   // process's console and provides its own links, so never pop a window there.
   const supervised = process.env.RACK || process.env.MAC;
@@ -506,6 +509,7 @@ function isWin() {
 /* --------------------------------------------------------- graceful shutdown */
 function shutdown() {
   playit.stopAgent();
+  manager.closeWakeListeners().catch(() => {});
   for (const s of store.all()) {
     const rtSlot = manager.slot(s.id);
     if (rtSlot.proc) manager.stop(s.id, { force: true });

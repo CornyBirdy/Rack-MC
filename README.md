@@ -211,8 +211,9 @@ after minutes. The dashboard, the sidebar dots and the server page all show
 **Paused** and **Sleeping** as states of their own, so an idle server never
 looks the same as one you stopped by hand.
 
-There is **no wake-on-join yet** — a deep-slept server needs someone to press
-Start. Give modpacks a generous timer.
+A third switch, **wake on join**, closes the loop: while the server is stopped
+the panel holds its port itself, so the server still shows up in the Minecraft
+server list — as "💤 Sleeping" — and trying to join starts it.
 
 ### Sleep when empty
 
@@ -240,6 +241,29 @@ The countdown is armed when the last player leaves and cancelled the moment
 someone joins, so a busy evening never trips it. A server that put itself to
 sleep is badged **Sleeping** rather than **Offline**; one you stopped yourself
 still reads **Offline**.
+
+### Wake on join
+
+With this on, a stopped server is not really gone: the panel parks a stand-in
+listener on its port that speaks just enough of the Minecraft protocol to be
+useful. In the server list it answers the ping as **💤 Sleeping**, and a join
+attempt boots the real server, disconnecting the player with a note to
+reconnect in a moment. Any server, any version — this is the panel's own doing,
+not Minecraft's.
+
+It is **not a proxy**. Once someone knocks the port goes straight back so Java
+can bind it, which means nobody can join *during* the boot — the player who
+woke it waits out the startup like everyone else, and a big modpack is still a
+couple of minutes. Holding those connections open across a boot would mean
+proxying every packet, which is a different and much larger job.
+
+The port is only held while the server is stopped, and it is handed back before
+launch, when you switch the toggle off, when the server is deleted, and when
+the panel shuts down. If something else already has the port, the console says
+so once and the listener stays out of the way.
+
+Pair it with deep sleep and an idle server costs nothing but still looks online
+to anyone who opens their server list.
 
 ## System monitor
 

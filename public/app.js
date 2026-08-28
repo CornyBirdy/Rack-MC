@@ -1019,7 +1019,7 @@ function renderPlayers(s) {
     ? s.players
         .map((p) => `<div class="player"><span class="head">${esc(p[0].toUpperCase())}</span><span class="pname">${esc(p)}</span>${pingChip((s.pings || {})[p])}</div>`)
         .join("")
-    : `<div class="players-empty">${s.status === "running" ? "No one online." : s.asleep ? "Sleeping — start it to wake up." : "Server offline."}</div>`;
+    : `<div class="players-empty">${s.status === "running" ? "No one online." : s.wakeArmed ? "Sleeping — joining the server wakes it." : s.asleep ? "Sleeping — start it to wake up." : "Server offline."}</div>`;
 }
 
 // Latency comes from the server's own `ping` command, which only Paper,
@@ -2031,6 +2031,7 @@ async function renderSettingsTab(id) {
   const canPause = data.pauseSupported !== false;
   const sleepOn = Number(def.sleepAfter) > 0;
   const sleepMins = sleepOn ? Number(def.sleepAfter) : 30;
+  const wakeOn = !!def.wakeOnJoin;
   const body = $("#tab-body");
   body.innerHTML = `
     <div style="max-width:620px">
@@ -2073,7 +2074,15 @@ async function renderSettingsTab(id) {
           <input type="number" id="st-sleep-mins" min="1" step="5" value="${sleepMins}" style="width:72px" ${sleepOn ? "" : "disabled"} />
           <span class="unit">min</span>
         </div>
-        <div class="hint">Minutes empty before the server stops itself. Waking it is a full boot — there is no wake-on-join yet, so someone has to press Start.</div>
+        <div class="hint">Minutes empty before the server stops itself. Waking it is a full boot, so give a big modpack room.</div>
+      </div>
+      <div class="form-row">
+        <label>Wake on join</label>
+        <div class="switch-row">
+          <label class="switch"><input type="checkbox" id="st-wake" ${wakeOn ? "checked" : ""} /><i></i></label>
+          <div class="txt"><b>Start the server when someone tries to join</b><span>While it is stopped the panel holds the port, shows "💤 Sleeping" in the server list, and boots it the moment anyone connects.</span></div>
+        </div>
+        <div class="hint">The player who knocks is asked to reconnect once it is up — nobody can join mid-boot, so a big modpack still means a couple of minutes in the queue. The port is only held while the server is stopped.</div>
       </div>
       <div style="display:flex;gap:10px;margin-top:8px"><button class="btn btn-primary" id="st-save">Save changes</button></div>
 
@@ -2091,6 +2100,7 @@ async function renderSettingsTab(id) {
   const mem = $("#st-mem"); mem.oninput = () => ($("#st-memv").textContent = fmtMem(Number(mem.value)));
   const pauseSw = $("#st-pause"); pauseSw.onchange = () => ($("#st-pause-secs").disabled = !pauseSw.checked);
   const sleepSw = $("#st-sleep"); sleepSw.onchange = () => ($("#st-sleep-mins").disabled = !sleepSw.checked);
+  const wakeSw = $("#st-wake");
   renderServerPlayit(id);
   $("#st-save").onclick = async () => {
     try {
@@ -2100,6 +2110,7 @@ async function renderSettingsTab(id) {
         memory: Number(mem.value), jvmArgs: $("#st-jvm").value.trim(), javaPath: $("#st-java").value.trim() || null,
         pauseWhenEmpty: pauseSw.checked ? Number($("#st-pause-secs").value) || 60 : 0,
         sleepAfter: sleepSw.checked ? Number($("#st-sleep-mins").value) || 30 : 0,
+        wakeOnJoin: wakeSw.checked,
       });
       toast("Settings saved.", "ok");
       const fresh = await API.get(`/api/servers/${id}`); state.servers.set(id, fresh.server); renderServer(id);
