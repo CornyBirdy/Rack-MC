@@ -79,6 +79,17 @@ function readRawBody(req, limit = 200 * 1024 * 1024) {
   });
 }
 
+// Quick-command buttons come straight from the browser, so keep only entries
+// that could plausibly be a console command and bound how many we store.
+function cleanQuickCommands(list) {
+  if (!Array.isArray(list)) return store.DEFAULT_QUICK_COMMANDS;
+  return list
+    .map((q) => (typeof q === "string" ? { cmd: q } : q || {}))
+    .filter((q) => typeof q.cmd === "string" && q.cmd.trim())
+    .slice(0, 40)
+    .map((q) => ({ label: String(q.label ?? "").trim().slice(0, 40), cmd: q.cmd.trim().slice(0, 256) }));
+}
+
 // Wrap async route handlers so thrown errors become 400s instead of crashes.
 function guard(fn) {
   return async (req, res, ctx) => {
@@ -179,6 +190,7 @@ const server = http.createServer(async (req, res) => {
       return sendJSON(res, 200, {
         loaders: loaders.list(),
         settings: store.getSettings(),
+        defaults: { quickCommands: store.DEFAULT_QUICK_COMMANDS },
         javas,
         playit: playit.snapshot(),
         sys: sysmon.snapshot(),
@@ -313,6 +325,11 @@ const server = http.createServer(async (req, res) => {
       const patch = {};
       if ("javaPath" in body) patch.javaPath = body.javaPath || null;
       if ("defaultMemory" in body) patch.defaultMemory = Number(body.defaultMemory) || 4096;
+      // null means "put the stock buttons back".
+      if ("quickCommands" in body)
+        patch.quickCommands = body.quickCommands === null
+          ? store.DEFAULT_QUICK_COMMANDS
+          : cleanQuickCommands(body.quickCommands);
       return sendJSON(res, 200, store.setSettings(patch));
     }
 

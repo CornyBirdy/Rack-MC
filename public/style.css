@@ -234,6 +234,20 @@ a { color: inherit; text-decoration: none; }
 .ping.none { color: var(--muted-2); padding: 2px 10px; }
 .players-empty { color: var(--muted-2); font-size: 12.5px; padding: 6px 4px; }
 
+/* ----------------------------------------------------------- quick commands */
+.players-box h4 .qc-edit { background: none; border: none; padding: 0; font: inherit; color: var(--muted-2); cursor: pointer; text-transform: none; letter-spacing: 0; }
+.players-box h4 .qc-edit:hover { color: var(--accent-2); }
+.qc-list { display: flex; flex-direction: column; gap: 6px; }
+.qc-btn { display: block; text-align: left; overflow: hidden; text-overflow: ellipsis; }
+.qc-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.qc-row .qc-label { width: 32%; flex: none; }
+.qc-row .qc-cmd { flex: 1; min-width: 0; }
+.qc-row .qc-del:hover { color: var(--red); }
+@media (max-width: 560px) {
+  .qc-row { flex-wrap: wrap; }
+  .qc-row .qc-label { width: 100%; }
+}
+
 /* -------------------------------------------------------------------- forms */
 .form-row { margin-bottom: 16px; }
 .form-row label { display: block; font-size: 12.5px; color: var(--muted); margin-bottom: 6px; font-weight: 550; }
@@ -486,6 +500,7 @@ select { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmln
   0%, 100% { opacity: 1; }
   50% { opacity: 0.45; }
 }
+
 /* ------------------------------------------------- compatibility filter locks */
 /* Three locks sit under the search box. Closed (the default) they keep results
  * to what this server can load; opened, the search widens and anything that no

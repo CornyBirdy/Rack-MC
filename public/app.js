@@ -30,6 +30,7 @@ const state = {
   loaders: [],
   javas: [],
   settings: {},
+  defaults: { quickCommands: [] }, // stock values the backend ships, for "reset"
   playit: { supported: false, linked: false, agent: "stopped" },
   sys: null, // latest host resource sample (see sysmon.js)
   servers: new Map(), // id -> summary
@@ -130,6 +131,7 @@ async function boot() {
     state.loaders = b.loaders;
     state.javas = b.javas;
     state.settings = b.settings;
+    state.defaults = b.defaults || state.defaults;
     state.playit = b.playit || state.playit;
     state.sys = b.sys || null;
     b.servers.forEach((s) => state.servers.set(s.id, s));
@@ -948,11 +950,8 @@ function renderConsoleTab(id) {
           <div id="pl-list"></div>
         </div>
         <div class="players-box">
-          <h4>Quick commands</h4>
-          <div style="display:flex;flex-direction:column;gap:6px">
-            ${["list", "say Hello from the panel!", "weather clear", "time set day", "save-all"].map((c) =>
-              `<button class="btn btn-sm btn-ghost" data-cmd="${esc(c)}" style="justify-content:flex-start">${esc(c)}</button>`).join("")}
-          </div>
+          <h4>Quick commands <button class="qc-edit" id="qc-edit" title="Customise these buttons">✎ Edit</button></h4>
+          <div id="qc-box">${quickCommandsHTML()}</div>
         </div>
       </div>
     </div>`;
@@ -970,12 +969,103 @@ function renderConsoleTab(id) {
     } else if (e.key === "ArrowUp" && history.length) { hi = Math.min(hi + 1, history.length - 1); inp.value = history[hi]; }
     else if (e.key === "ArrowDown") { hi = Math.max(hi - 1, -1); inp.value = hi < 0 ? "" : history[hi]; }
   };
-  $$("[data-cmd]").forEach((b) => (b.onclick = async () => {
-    try { await API.post(`/api/servers/${id}/command`, { cmd: b.dataset.cmd }); } catch (e) { toast(e.message, "err"); }
-  }));
+  bindQuickCommands(id);
   $("#con-clear").onclick = () => (out.innerHTML = "");
 
   openConsoleStream(id, out);
+}
+
+/* ------------------------------------------------------- quick commands */
+/* One list, kept in global settings, shown beside every server's console —
+ * `label` is optional and the button falls back to the command itself. */
+
+function quickCommands() {
+  const list = state.settings.quickCommands;
+  return Array.isArray(list) ? list : state.defaults.quickCommands || [];
+}
+
+function quickCommandsHTML() {
+  const list = quickCommands();
+  if (!list.length) return `<div class="players-empty">No quick commands — add some with Edit.</div>`;
+  return `<div class="qc-list">${list.map((q) =>
+    `<button class="btn btn-sm btn-ghost qc-btn" data-cmd="${esc(q.cmd)}" title="${esc(q.cmd)}">${esc(q.label || q.cmd)}</button>`).join("")}</div>`;
+}
+
+function bindQuickCommands(id) {
+  $$("#qc-box [data-cmd]").forEach((b) => (b.onclick = async () => {
+    try { await API.post(`/api/servers/${id}/command`, { cmd: b.dataset.cmd }); } catch (e) { toast(e.message, "err"); }
+  }));
+  $("#qc-edit").onclick = () => openQuickCommandsEditor(() => {
+    $("#qc-box").innerHTML = quickCommandsHTML();
+    bindQuickCommands(id);
+  });
+}
+
+function openQuickCommandsEditor(onSaved) {
+  let rows = quickCommands().map((q) => ({ label: q.label || "", cmd: q.cmd }));
+
+  modal(`
+    <div class="modal-head"><h2>✎ Quick commands</h2><button class="modal-close">×</button></div>
+    <div class="modal-body">
+      <p class="hint" style="margin-top:0">These buttons sit next to every server's console and send the command straight to it. The label is optional — leave it blank and the button shows the command itself.</p>
+      <div id="qc-rows"></div>
+      <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
+        <button class="btn btn-sm" id="qc-add">+ Add command</button>
+        <button class="btn btn-sm btn-ghost" id="qc-reset">↺ Reset to defaults</button>
+      </div>
+    </div>
+    <div class="modal-foot"><span></span><div style="display:flex;gap:10px">
+      <button class="btn btn-ghost" data-x>Cancel</button>
+      <button class="btn btn-primary" id="qc-save">Save</button>
+    </div></div>`);
+  $(".modal-close").onclick = $("[data-x]").onclick = closeModal;
+
+  // The inputs are the live copy while the modal is open, so pull them back
+  // into `rows` before anything that redraws the list.
+  const sync = () => $$("#qc-rows .qc-row").forEach((el, i) => {
+    rows[i] = { label: $(".qc-label", el).value, cmd: $(".qc-cmd", el).value };
+  });
+
+  const draw = () => {
+    $("#qc-rows").innerHTML = rows.length
+      ? rows.map((q, i) => `
+        <div class="qc-row">
+          <input type="text" class="qc-label" placeholder="Label (optional)" maxlength="40" value="${esc(q.label)}" />
+          <input type="text" class="qc-cmd mono" placeholder="say hello" maxlength="256" value="${esc(q.cmd)}" />
+          <button class="btn btn-sm btn-ghost btn-icon" data-up title="Move up" ${i === 0 ? "disabled" : ""}>↑</button>
+          <button class="btn btn-sm btn-ghost btn-icon" data-down title="Move down" ${i === rows.length - 1 ? "disabled" : ""}>↓</button>
+          <button class="btn btn-sm btn-ghost btn-icon qc-del" data-del title="Remove">×</button>
+        </div>`).join("")
+      : `<p class="muted" style="margin:0">Nothing here yet — add a command below.</p>`;
+
+    $$("#qc-rows .qc-row").forEach((el, i) => {
+      const move = (j) => { sync(); rows.splice(j, 0, rows.splice(i, 1)[0]); draw(); };
+      $("[data-up]", el).onclick = () => move(i - 1);
+      $("[data-down]", el).onclick = () => move(i + 1);
+      $("[data-del]", el).onclick = () => { sync(); rows.splice(i, 1); draw(); };
+      $$("input", el).forEach((inp) => (inp.onkeydown = (e) => { if (e.key === "Enter") $("#qc-save").click(); }));
+    });
+  };
+  draw();
+
+  $("#qc-add").onclick = () => {
+    sync(); rows.push({ label: "", cmd: "" }); draw();
+    $$("#qc-rows .qc-cmd").pop()?.focus();
+  };
+  $("#qc-reset").onclick = () => {
+    rows = (state.defaults.quickCommands || []).map((q) => ({ label: q.label || "", cmd: q.cmd }));
+    draw();
+  };
+  $("#qc-save").onclick = async () => {
+    sync();
+    const list = rows.map((q) => ({ label: q.label.trim(), cmd: q.cmd.trim() })).filter((q) => q.cmd);
+    try {
+      state.settings = await API.put("/api/settings", { quickCommands: list });
+      closeModal();
+      toast("Quick commands saved.", "ok");
+      onSaved?.();
+    } catch (e) { toast(e.message, "err"); }
+  };
 }
 
 function appendConsole(out, stream, line) {

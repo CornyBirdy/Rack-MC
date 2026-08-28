@@ -185,6 +185,10 @@ Details worth knowing:
 - **Accept the EULA** — one click, required by Mojang before first start.
 - **Console** — live output, a command box (with ↑/↓ history), quick commands,
   and a live player list.
+- **Quick commands** — the buttons beside the console are yours to change. Hit
+  **✎ Edit** on that box to add, rename, reorder or remove them; a label is
+  optional (blank shows the command itself). The list is global — every server
+  gets the same buttons — and **Reset to defaults** puts the stock five back.
 - **Mods / Plugins / Datapacks** — search Modrinth and install into this server
   in one click, with dependencies; list, update and remove what's there.
 - **Files** — browse the server folder, upload `.jar` mods/plugins, edit
