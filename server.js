@@ -411,6 +411,7 @@ const server = http.createServer(async (req, res) => {
           const out = await modrinth.install(store.dirFor(id), def, {
             versionId: body.versionId || null,
             projectId: body.projectId || null,
+            allowIncompatible: !!body.allowIncompatible,
             log: (line) => manager.emitInstall(id, line),
           });
           sendJSON(res, 200, { ...out, running: manager.slot(id).status === "running" });

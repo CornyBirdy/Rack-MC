@@ -486,3 +486,73 @@ select { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmln
   0%, 100% { opacity: 1; }
   50% { opacity: 0.45; }
 }
+/* ------------------------------------------------- compatibility filter locks */
+/* Three locks sit under the search box. Closed (the default) they keep results
+ * to what this server can load; opened, the search widens and anything that no
+ * longer fits is called out on its row. */
+.filter-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 12px; }
+.fl-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.7px; color: var(--muted-2); }
+.fchip {
+  display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 550;
+  padding: 4px 11px 4px 9px; border-radius: 20px; cursor: pointer; font-family: inherit;
+  border: 1px solid var(--line-2); background: var(--panel-2); color: var(--text);
+  transition: border-color 0.12s, background 0.12s, color 0.12s;
+  white-space: nowrap; line-height: 1.5;
+}
+.fchip .fl-ic { font-size: 11px; line-height: 1; }
+.fchip.on { border-color: rgba(108, 92, 231, 0.45); background: rgba(108, 92, 231, 0.14); color: var(--accent-2); }
+.fchip.off { color: var(--muted-2); border-style: dashed; background: transparent; }
+.fchip:hover { border-color: var(--accent); }
+.fl-warn { font-size: 11.5px; color: var(--amber); }
+
+/* Marks a result that came back only because a lock is open. */
+.pk-warn {
+  font-size: 10.5px; font-weight: 600; color: var(--amber); white-space: nowrap;
+  background: rgba(217, 164, 65, 0.12); border: 1px solid rgba(217, 164, 65, 0.35);
+  padding: 1px 7px; border-radius: 20px;
+}
+
+/* ------------------------------------------------------------ version picker */
+.vp-top { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+.vp-who { flex: 1; min-width: 160px; line-height: 1.35; }
+.vp-who b { display: block; font-size: 14px; }
+.vp-who span { font-size: 11.5px; color: var(--muted-2); }
+.vp-list { border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+.vp-row {
+  display: flex; align-items: center; gap: 13px; padding: 11px 14px;
+  border-bottom: 1px solid var(--line);
+}
+.vp-row:last-child { border-bottom: none; }
+.vp-row:hover { background: var(--panel); }
+.vp-row.bad { opacity: 0.62; }
+.vp-row.cur { background: rgba(108, 92, 231, 0.07); }
+
+/* Release channel, colour-coded so stability reads at a glance. */
+.vp-ch {
+  width: 62px; flex-shrink: 0; text-align: center; font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.5px; padding: 3px 0; border-radius: 5px;
+}
+.vp-ch.release { color: var(--green-2); background: rgba(63, 185, 80, 0.14); }
+.vp-ch.beta { color: var(--amber); background: rgba(217, 164, 65, 0.14); }
+.vp-ch.alpha { color: var(--red); background: rgba(240, 85, 106, 0.14); }
+
+.vp-meta { flex: 1; min-width: 0; }
+.vp-num {
+  font-size: 13.5px; font-weight: 600; font-family: var(--mono);
+  display: flex; align-items: center; gap: 7px; flex-wrap: wrap;
+}
+.vp-sub { font-size: 11.5px; color: var(--muted); margin-top: 3px; }
+.vp-tag {
+  font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
+  padding: 2px 7px; border-radius: 20px; font-family: var(--font);
+  color: var(--muted-2); background: var(--panel-3);
+}
+.vp-tag.latest { color: var(--green-2); background: rgba(63, 185, 80, 0.14); }
+.vp-tag.cur { color: var(--accent-2); background: rgba(108, 92, 231, 0.16); }
+.vp-tag.bad { color: var(--amber); background: rgba(217, 164, 65, 0.14); }
+}
+.vp-sep {
+  padding: 7px 14px; font-size: 10.5px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.6px; color: var(--muted-2); background: var(--bg-2);
+  border-bottom: 1px solid var(--line); border-top: 1px solid var(--line);
+}

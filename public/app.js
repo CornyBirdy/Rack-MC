@@ -1075,12 +1075,12 @@ function fmtCount(n) {
 }
 
 // One search result. Shared by the modpack picker and the content browser.
-function projectRowHTML(p, selected, actions = "") {
+function projectRowHTML(p, selected, actions = "", badge = "") {
   return `
     <div class="pk-row ${selected ? "sel" : ""}" data-id="${esc(p.id)}" data-slug="${esc(p.slug)}">
       <span class="pk-icon">${p.icon ? `<img src="${esc(p.icon)}" alt="" loading="lazy" />` : "<span>📦</span>"}</span>
       <div class="pk-meta">
-        <div class="pk-title">${esc(p.title)} <span class="pk-author">by ${esc(p.author)}</span></div>
+        <div class="pk-title">${esc(p.title)} <span class="pk-author">by ${esc(p.author)}</span> ${badge}</div>
         <div class="pk-desc">${esc(p.description)}</div>
         <div class="pk-tags">${(p.categories || []).map((c) => `<span class="tag">${esc(c)}</span>`).join("")}</div>
       </div>
@@ -1121,7 +1121,7 @@ async function renderContentTab(id) {
     <div class="mods-head">
       <div>
         <h3>Browse Modrinth</h3>
-        <p class="muted">Only ${esc(content.noun.toLowerCase())} that run on ${esc(cap(content.loader))} ${esc(s.mc)} are listed.</p>
+        <p class="muted">Scoped to what this server can load. Open a lock below to search wider.</p>
       </div>
     </div>
     <div class="pk-bar">
@@ -1130,10 +1130,15 @@ async function renderContentTab(id) {
         ${[["relevance", "Best match"], ["downloads", "Most downloads"], ["follows", "Most followed"], ["updated", "Recently updated"]]
           .map(([v, l]) => `<option value="${v}" ${v === "downloads" ? "selected" : ""}>${l}</option>`).join("")}
       </select>
-      <label class="chk" title="Client-only mods do nothing on a server, and a few crash it"><input type="checkbox" id="md-srv" checked /> Server-compatible only</label>
     </div>
+    <div class="filter-bar" id="md-filters"></div>
     <div class="pk-list" id="md-list"></div>
     <div id="md-more" style="margin-top:12px"></div>`;
+
+  // Locked by default: only things that fit this server. Each lock can be
+  // opened individually, so you can go looking for a mod the filters hid.
+  state.mdFilters = { loader: true, mc: true, server: true };
+  renderFilters(id);
 
   await loadInstalled(id);
 
@@ -1142,9 +1147,66 @@ async function renderContentTab(id) {
   q.oninput = () => { clearTimeout(timer); timer = setTimeout(() => browse(id, 0), 350); };
   q.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); clearTimeout(timer); browse(id, 0); } };
   $("#md-sort").onchange = () => browse(id, 0);
-  $("#md-srv").onchange = () => browse(id, 0);
   $("#md-upd").onclick = () => checkUpdates(id);
   browse(id, 0);
+}
+
+/* ------------------------------------------------------- compatibility locks */
+/* Three constraints keep the results to things this server can load. They are
+ * on by default because installing a Forge mod on Paper is a crash, not a
+ * surprise — but they're locks, not walls: click one open and the search
+ * widens, with anything that no longer fits marked as such. */
+
+function filterDefs(id) {
+  const s = state.servers.get(id);
+  const c = s.content;
+  return [
+    { key: "loader", on: `${cap(c.loader)} only`, off: "Any loader",
+      tip: `Only ${c.noun.toLowerCase()} built for ${cap(c.loader)}` },
+    { key: "mc", on: `MC ${s.mc}`, off: "Any Minecraft version",
+      tip: `Only builds that list Minecraft ${s.mc}` },
+    { key: "server", on: "Server-side", off: "Client mods too",
+      tip: "Hide client-only projects — on a server they do nothing, and a few crash it" },
+  ];
+}
+
+function renderFilters(id) {
+  const box = $("#md-filters");
+  if (!box) return;
+  const f = state.mdFilters;
+  const defs = filterDefs(id);
+  const open = defs.filter((d) => !f[d.key]).length;
+
+  box.innerHTML =
+    `<span class="fl-label">Showing</span>` +
+    defs.map((d) => `
+      <button class="fchip ${f[d.key] ? "on" : "off"}" data-f="${d.key}" title="${esc(d.tip)} — click to ${f[d.key] ? "unlock" : "lock"}">
+        <span class="fl-ic">${f[d.key] ? "🔒" : "🔓"}</span> ${esc(f[d.key] ? d.on : d.off)}
+      </button>`).join("") +
+    (open
+      ? `<span class="fl-warn">⚠ ${open} filter${open === 1 ? "" : "s"} unlocked — results may not run here.</span>`
+      : "");
+
+  $$(".fchip", box).forEach((b) => (b.onclick = () => {
+    state.mdFilters[b.dataset.f] = !state.mdFilters[b.dataset.f];
+    renderFilters(id);
+    browse(id, 0);
+  }));
+}
+
+// Does this search result fit the server as it is configured? Only consulted
+// once a lock is open — with everything locked, every result fits by
+// construction.
+function compatOf(hit, id) {
+  const s = state.servers.get(id);
+  const c = s.content;
+  const loaderOk = !hit.loaderTags.length || hit.loaderTags.some((l) => c.loaders.includes(l));
+  const mcOk = !hit.gameVersions.length || hit.gameVersions.includes(s.mc);
+  if (loaderOk && mcOk) return null;
+  const why = [];
+  if (!loaderOk) why.push(`no ${cap(c.loader)} build`);
+  if (!mcOk) why.push(`not for ${s.mc}`);
+  return why.join(" · ");
 }
 
 async function loadInstalled(id) {
@@ -1213,26 +1275,37 @@ async function browse(id, offset) {
   const content = s.content;
   const query = $("#md-q").value.trim();
   const sort = $("#md-sort").value;
-  const serverOnly = $("#md-srv").checked ? "1" : "0";
+  const f = state.mdFilters || { loader: true, mc: true, server: true };
   if (!offset) list.innerHTML = `<div class="pk-empty"><span class="spinner"></span> Searching Modrinth…</div>`;
 
   try {
     const r = await API.get(
       `/api/modrinth/search?type=${encodeURIComponent(content.projectType)}` +
-        `&mc=${encodeURIComponent(s.mc)}&q=${encodeURIComponent(query)}&sort=${encodeURIComponent(sort)}` +
-        `&server=${serverOnly}&offset=${offset}&limit=20${loaderQS(content)}`
+        `&q=${encodeURIComponent(query)}&sort=${encodeURIComponent(sort)}` +
+        `&server=${f.server ? "1" : "0"}&offset=${offset}&limit=20` +
+        (f.mc ? `&mc=${encodeURIComponent(s.mc)}` : "") +
+        (f.loader ? loaderQS(content) : "")
     );
-    const have = new Set(((state.content && state.content.items) || []).map((i) => i.projectId));
+    state.mdHits = { ...(offset ? state.mdHits : {}) };
+    const have = new Map(((state.content && state.content.items) || []).map((i) => [i.projectId, i]));
     const html = r.hits
-      .map((h) => projectRowHTML(h, false, `
-        <div class="pk-actions">
-          <button class="btn btn-sm ${have.has(h.id) ? "" : "btn-primary"}" data-install="${esc(h.id)}">${have.has(h.id) ? "Reinstall" : "Install"}</button>
-          <button class="btn btn-sm btn-ghost btn-icon" data-versions="${esc(h.slug)}" title="Pick a specific version">⋯</button>
-        </div>`))
+      .map((h) => {
+        state.mdHits[h.id] = h;
+        const bad = f.loader && f.mc ? null : compatOf(h, id);
+        return projectRowHTML(
+          h,
+          false,
+          `<div class="pk-actions">
+            <button class="btn btn-sm ${have.has(h.id) ? "" : "btn-primary"}" data-install="${esc(h.id)}">${have.has(h.id) ? "Reinstall" : "Install"}</button>
+            <button class="btn btn-sm btn-ghost btn-icon" data-versions="${esc(h.id)}" title="Pick a specific version">⋯</button>
+          </div>`,
+          bad ? `<span class="pk-warn" title="This won't load on ${esc(cap(content.loader))} ${esc(s.mc)}">⚠ ${esc(bad)}</span>` : ""
+        );
+      })
       .join("");
 
     if (!offset)
-      list.innerHTML = html || `<div class="pk-empty">Nothing on Modrinth matches that for ${esc(cap(content.loader))} ${esc(s.mc)}.</div>`;
+      list.innerHTML = html || `<div class="pk-empty">Nothing on Modrinth matches that${f.loader || f.mc ? ` for ${esc(cap(content.loader))} ${esc(s.mc)} — try unlocking a filter above.` : "."}</div>`;
     else list.insertAdjacentHTML("beforeend", html);
 
     const shown = offset + r.hits.length;
@@ -1253,7 +1326,12 @@ function bindBrowseActions(id, root) {
   $$("[data-install]", root).forEach((b) => {
     if (b._bound) return;
     b._bound = true;
-    b.onclick = () => installContent(id, { projectId: b.dataset.install }, b);
+    b.onclick = () => {
+      const f = state.mdFilters || {};
+      // With a lock open, "Install" means "install it even though it may not
+      // fit" — otherwise the backend refuses and the button just errors.
+      installContent(id, { projectId: b.dataset.install, allowIncompatible: !f.loader || !f.mc }, b);
+    };
   });
   $$("[data-versions]", root).forEach((b) => {
     if (b._bound) return;
@@ -1297,39 +1375,131 @@ async function installContent(id, body, btn) {
   }
 }
 
-// Pick an exact build instead of "whatever is newest" — what you want when a
-// pack, or a friend's client, pins one particular version.
-async function openVersionPicker(id, slug) {
+/* ------------------------------------------------------------ version picker */
+/* "Install" takes the newest build that fits. This is for when you need a
+ * particular one — a pack pins it, or a friend's client is on it. Modrinth
+ * hands back a lot per version (a name, a version number, sometimes a dozen
+ * game versions), so the job here is to boil each one down to the three things
+ * that actually decide it: how stable it is, what it runs on, how old it is. */
+
+// A dozen game versions is noise; the span between the first and last is the
+// useful part. Modrinth returns them oldest-first.
+function mcRange(list) {
+  if (!list || !list.length) return "any version";
+  if (list.length === 1) return "MC " + list[0];
+  return `MC ${list[0]} – ${list[list.length - 1]}`;
+}
+
+function fmtDate(iso) {
+  const d = new Date(iso);
+  if (isNaN(d)) return "";
+  const days = Math.floor((Date.now() - d.getTime()) / 86400000);
+  if (days <= 0) return "today";
+  if (days === 1) return "yesterday";
+  if (days < 30) return `${days} days ago`;
+  return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+}
+
+const CHANNEL = {
+  release: { label: "Release", note: "stable" },
+  beta: { label: "Beta", note: "testing" },
+  alpha: { label: "Alpha", note: "unstable" },
+};
+
+async function openVersionPicker(id, projectId) {
   const s = state.servers.get(id);
   const content = s.content;
+  const p = (state.mdHits && state.mdHits[projectId]) || null;
+  const installedItem = ((state.content && state.content.items) || []).find((i) => i.projectId === projectId);
+  const f = state.mdFilters || {};
+
   modal(`
     <div class="modal-head"><h2>Choose a version</h2><button class="modal-close">×</button></div>
-    <div class="modal-body" id="vp-body"><div class="pk-empty"><span class="spinner"></span> Loading versions…</div></div>
-    <div class="modal-foot"><span class="muted mono" style="font-size:12px">${esc(slug)}</span><button class="btn btn-ghost" data-x>Close</button></div>`,
-    { wide: true });
+    <div class="modal-body">
+      <div class="vp-top">
+        <span class="pk-icon">${p && p.icon ? `<img src="${esc(p.icon)}" alt="" />` : "<span>🧩</span>"}</span>
+        <div class="vp-who">
+          <b>${esc(p ? p.title : "This project")}</b>
+          <span>Installs into <span class="mono">${esc(content.folder === "datapacks" ? "world/datapacks" : content.folder)}/</span> · ${esc(cap(content.loader))} · Minecraft ${esc(s.mc)}</span>
+        </div>
+        <label class="chk" title="Builds for other loaders or Minecraft versions won't load on this server">
+          <input type="checkbox" id="vp-all" ${!f.loader || !f.mc ? "checked" : ""} /> Show builds that don't fit
+        </label>
+      </div>
+      <div id="vp-list"><div class="pk-empty"><span class="spinner"></span> Loading versions…</div></div>
+    </div>
+    <div class="modal-foot">
+      ${p ? `<a class="muted" href="https://modrinth.com/project/${esc(p.slug)}" target="_blank" rel="noopener" style="font-size:12px;text-decoration:underline">Changelogs on Modrinth ↗</a>` : "<span></span>"}
+      <button class="btn btn-ghost" data-x>Close</button>
+    </div>`, { wide: true });
   $(".modal-close").onclick = $("[data-x]").onclick = closeModal;
-  try {
-    const { versions } = await API.get(
-      `/api/modrinth/versions?project=${encodeURIComponent(slug)}&mc=${encodeURIComponent(s.mc)}${loaderQS(content)}`
-    );
-    const b = $("#vp-body");
-    if (!b) return;
-    b.innerHTML = versions.length
-      ? `<div class="file-table">${versions.slice(0, 60).map((v) => `
-          <div class="file-row">
-            <span class="fic">${v.type === "release" ? "🟢" : v.type === "beta" ? "🟡" : "🔴"}</span>
-            <span class="fname">${esc(v.number)}
-              <span class="muted">${esc(v.name)} · ${esc(v.gameVersions.join(", "))} · ${fmtCount(v.downloads)} downloads</span></span>
-            <button class="btn btn-sm btn-primary" data-v="${esc(v.id)}">Install</button>
-          </div>`).join("")}</div>`
-      : `<div class="pk-empty">No builds of this project target ${esc(cap(content.loader))} ${esc(s.mc)}.</div>`;
-    $$("[data-v]", b).forEach((btn) => (btn.onclick = async () => {
+  $("#vp-all").onchange = load;
+  load();
+
+  async function load() {
+    const box = $("#vp-list");
+    if (!box) return;
+    const all = $("#vp-all").checked;
+    box.innerHTML = `<div class="pk-empty"><span class="spinner"></span> Loading versions…</div>`;
+    try {
+      const { versions } = await API.get(
+        `/api/modrinth/versions?project=${encodeURIComponent(projectId)}` +
+          (all ? "" : `&mc=${encodeURIComponent(s.mc)}${loaderQS(content)}`)
+      );
+      if (!$("#vp-list")) return; // modal closed while we were fetching
+      render(versions);
+    } catch (e) {
+      const b = $("#vp-list");
+      if (b) b.innerHTML = `<div class="banner err" style="margin:0">${esc(e.message)}</div>`;
+    }
+  }
+
+  function render(versions) {
+    const box = $("#vp-list");
+    if (!versions.length) {
+      box.innerHTML = `<div class="pk-empty">No builds of this project target ${esc(cap(content.loader))} ${esc(s.mc)}.
+        ${$("#vp-all").checked ? "" : "<br />Tick “show builds that don’t fit” above to see the rest."}</div>`;
+      return;
+    }
+    const fits = (v) =>
+      v.loaders.some((l) => content.loaders.includes(l)) && v.gameVersions.includes(s.mc);
+
+    // Once the misfits are shown, the handful that actually run here can be
+    // hundreds of rows down — so they go first, under their own heading, and
+    // the newest of them is the one tagged "Latest".
+    const fitting = versions.filter(fits);
+    const misfits = versions.filter((v) => !fits(v));
+    const ordered = [...fitting, ...misfits].slice(0, 80);
+    const latestId = (fitting[0] || {}).id;
+    const sep = `<div class="vp-sep">Doesn't fit ${esc(cap(content.loader))} ${esc(s.mc)}</div>`;
+
+    box.innerHTML = `<div class="vp-list">${ordered.map((v, i) => {
+      const head = i === fitting.length && fitting.length && misfits.length ? sep : "";
+      const ch = CHANNEL[v.type] || CHANNEL.release;
+      const bad = !fits(v);
+      const isInstalled = installedItem && installedItem.versionId === v.id;
+      return head + `
+        <div class="vp-row ${bad ? "bad" : ""} ${isInstalled ? "cur" : ""}">
+          <span class="vp-ch ${esc(v.type)}" title="${ch.note}">${ch.label}</span>
+          <div class="vp-meta">
+            <div class="vp-num">${esc(v.number)}
+              ${v.id === latestId ? `<span class="vp-tag latest">Latest that fits</span>` : ""}
+              ${isInstalled ? `<span class="vp-tag cur">Installed</span>` : ""}
+              ${bad ? `<span class="vp-tag bad" title="This build won't load on ${esc(cap(content.loader))} ${esc(s.mc)}">⚠ doesn't fit</span>` : ""}
+            </div>
+            <div class="vp-sub" title="${esc(v.gameVersions.join(", "))}">
+              ${esc(v.loaders.map(cap).join(", ") || "any loader")} · ${esc(mcRange(v.gameVersions))} · ${esc(fmtDate(v.published))} · ${fmtCount(v.downloads)} downloads
+            </div>
+          </div>
+          <button class="btn btn-sm ${bad || isInstalled ? "" : "btn-primary"}" data-v="${esc(v.id)}">${isInstalled ? "Reinstall" : bad ? "Install anyway" : "Install"}</button>
+        </div>`;
+    }).join("")}</div>
+    ${versions.length > ordered.length ? `<p class="hint">Showing ${ordered.length} of ${versions.length} builds.</p>` : ""}`;
+
+    $$("[data-v]", box).forEach((btn) => (btn.onclick = async () => {
       await installContent(id, { versionId: btn.dataset.v }, btn);
       closeModal();
     }));
-  } catch (e) {
-    const b = $("#vp-body");
-    if (b) b.innerHTML = `<div class="banner err" style="margin:0">${esc(e.message)}</div>`;
   }
 }
 
