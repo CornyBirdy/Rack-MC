@@ -396,6 +396,7 @@ const server = http.createServer(async (req, res) => {
       if (action === "properties" && req.method === "PUT") {
         const body = await readJSONBody(req);
         manager.writeProperties(id, String(body.text || ""));
+        manager.syncPauseFromProperties(id); // keep the sleep switch in step
         return sendJSON(res, 200, { ok: true });
       }
 
