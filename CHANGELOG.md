@@ -35,8 +35,20 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 - **Modrinth compatibility filters are now locks.** Loader, Minecraft version
   and server-side are on by default but each can be opened individually to
   widen a search, with anything that no longer fits marked as such.
-- **The Properties tab is a real settings UI** — typed, described fields
-  instead of raw text editing.
+- **The Properties tab is a real settings UI.** `server.properties` was a bare
+  textarea; it is now a form of typed, described fields grouped into Gameplay,
+  Players, World, Performance, Resource pack, Network and Advanced — switches
+  for the booleans, dropdowns for difficulty, game mode and world type, number
+  fields carrying their units and clamped to the range Minecraft accepts, and a
+  masked field for the RCON password. Every key keeps its real name beside a
+  plain-English line explaining it, a search box filters the lot, and the motd
+  has a live preview that renders its `§` colour codes. The file stays the
+  source of truth: only keys you actually touch are rewritten, so comments,
+  ordering and keys the panel has never heard of survive a save — unrecognised
+  keys are listed in their own group rather than hidden. A server that has not
+  booted yet shows the vanilla defaults with its own port and slots filled in,
+  and saving writes the file early. The old textarea is still there behind a
+  **Raw file** toggle.
 - `worktree.bat`, for giving each parallel session its own checkout.
 
 ### Fixed

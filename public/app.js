@@ -1769,7 +1769,7 @@ const PROP_GROUPS = [
     { k: "simulation-distance", n: "Simulation distance", t: INT, d: "10", min: 2, max: 32, unit: "chunks", desc: "How far entities, redstone and crops keep ticking." },
     { k: "entity-broadcast-range-percentage", n: "Entity range", t: INT, d: "100", min: 10, max: 1000, unit: "%", desc: "Distance at which entities are sent to clients. Lower is lighter." },
     { k: "max-tick-time", n: "Watchdog timeout", t: INT, d: "60000", min: -1, unit: "ms", desc: "Crash the server if a tick hangs this long. -1 disables the watchdog." },
-    { k: "pause-when-empty-seconds", n: "Pause when empty", t: INT, d: "60", min: -1, unit: "sec", desc: "Seconds of emptiness before the server stops ticking. The Settings tab's sleep switch writes this too." },
+    { k: "pause-when-empty-seconds", n: "Pause when empty", t: INT, d: "60", min: -1, unit: "sec", desc: "Seconds of emptiness before the server stops ticking. Saving here moves the Settings sleep switch to match; -1 is off." },
     { k: "network-compression-threshold", n: "Compression threshold", t: INT, d: "256", min: -1, unit: "bytes", desc: "Compress packets above this size. -1 disables compression." },
     { k: "sync-chunk-writes", n: "Sync chunk writes", t: BOOL, d: "true", desc: "Flush chunks to disk immediately. Off is faster but riskier on a crash." },
     { k: "max-chained-neighbor-updates", n: "Chained block updates", t: INT, d: "1000000", desc: "Cap on consecutive neighbour updates before the rest are dropped." },
