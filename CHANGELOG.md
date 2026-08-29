@@ -27,6 +27,19 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   the top. The walk is capped at 300 matches and 12 levels and says when it
   stopped early — a world folder is tens of thousands of region files, and it
   is not fired on every keystroke for the same reason.
+- **Drag and drop into the file explorer.** Files and whole folders can be
+  dragged in from the desktop. Drop them anywhere in the file pane to land in
+  the folder you have open, or drop them on a folder row to go straight inside
+  it — the row highlights and a label names the destination before you let go.
+  Directory trees only reach the browser through the drag-and-drop entry API,
+  which is drained a hundred children at a time and goes empty the moment the
+  drop handler returns, so the tree is walked from handles taken synchronously.
+- **Upload folders, not just files.** A second picker beside Upload takes a
+  directory and keeps its structure, empty sub-folders included. Both pickers
+  and the drop zone share one runner: four uploads in flight, a single progress
+  bar for the batch rather than a toast per file, and a count of anything that
+  failed at the end. A batch over 50 files or 250 MB says what it is about to
+  send and asks first — a dropped world folder is tens of thousands of files.
 - **Filter the installed mod list.** The Mods tab had a search box for
   Modrinth but none for what is already installed. There is one now, matching
   on title, filename and version, and the update badges survive it — they are

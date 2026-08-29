@@ -1807,14 +1807,24 @@ async function renderFilesTab(id, dir = "") {
         <button class="fm-x" id="fm-q-clear" title="Clear search" hidden>×</button>
       </div>
       <div style="margin-left:auto;display:flex;gap:8px">
-        <button class="btn btn-sm" id="fm-mkdir">${ico("folder")} New folder</button>
+        <button class="btn btn-sm" id="fm-mkdir">${ico("plus")} New folder</button>
+        <label class="btn btn-sm" style="cursor:pointer" title="Upload a folder, keeping its structure">${ico("folder")} Upload folder
+          <input type="file" id="fm-upload-dir" webkitdirectory directory multiple style="display:none" />
+        </label>
         <label class="btn btn-sm btn-primary" style="cursor:pointer">${ico("upload")} Upload
           <input type="file" id="fm-upload" multiple style="display:none" />
         </label>
       </div>
     </div>
-    <div class="file-table" id="fm-table"></div>
-    <p class="hint" style="margin-top:10px">Tick rows to delete or move several at once — shift-click extends the selection. Drop mods into <span class="mono">mods/</span>, plugins into <span class="mono">plugins/</span>, datapacks into <span class="mono">world/datapacks/</span> — or install them from Modrinth in the previous tab.</p>`;
+    <div class="fm-prog" id="fm-prog" hidden>
+      <div class="fm-prog-track"><i id="fm-prog-fill"></i></div>
+      <span class="fm-prog-text" id="fm-prog-text"></span>
+    </div>
+    <div class="fm-drop" id="fm-drop">
+      <div class="file-table" id="fm-table"></div>
+      <p class="hint" style="margin-top:10px">Drag files or whole folders in from your desktop — drop them on a folder row to go straight inside it. Tick rows to delete or move several at once; shift-click extends the selection. Mods go in <span class="mono">mods/</span>, plugins in <span class="mono">plugins/</span>, datapacks in <span class="mono">world/datapacks/</span> — or install them from Modrinth in the previous tab.</p>
+      <div class="fm-drop-veil" id="fm-drop-veil"><span id="fm-drop-label"></span></div>
+    </div>`;
 
   const q = $("#fm-q");
   q.oninput = () => {
@@ -1835,21 +1845,183 @@ async function renderFilesTab(id, dir = "") {
     try { await API.post(`/api/servers/${id}/mkdir`, { path: joinPath(fmDir, name) }); loadDir(id, fmDir); }
     catch (e) { toast(e.message, "err"); }
   };
-  $("#fm-upload").onchange = async (ev) => {
-    for (const file of ev.target.files) {
-      try {
-        await fetch(`/api/servers/${id}/upload?path=${encodeURIComponent(fmDir)}&name=${encodeURIComponent(file.name)}`, { method: "POST", body: file });
-        toast(`Uploaded ${file.name}`, "ok");
-      } catch (e) { toast(`Upload failed: ${file.name}`, "err"); }
-    }
-    loadDir(id, fmDir);
-  };
+  // Both pickers feed the same runner. The folder picker fills in
+  // webkitRelativePath, which is the tree we rebuild on the server.
+  const pick = (input) => (input.onchange = (ev) => {
+    const files = [...ev.target.files].map((f) => ({ file: f, rel: f.webkitRelativePath || f.name }));
+    ev.target.value = "";  // so picking the same thing twice still fires
+    if (files.length) runUpload(id, fmDir, files, []);
+  });
+  pick($("#fm-upload"));
+  pick($("#fm-upload-dir"));
+  wireDropZone(id);
 
   await loadDir(id, dir);
 }
 
 function joinPath(a, b) { return (a ? a + "/" : "") + b; }
 function parentOf(p) { const i = p.lastIndexOf("/"); return i < 0 ? "" : p.slice(0, i); }
+// The server folder itself has no path to print, and a bare "/" reads as a
+// typo mid-sentence. The breadcrumb already calls it root, so everything does.
+function dirLabel(d) { return d ? "/" + d : "root"; }
+
+/* ---------------------------------------------------------------- uploads */
+/* Dropping from the desktop and picking with the buttons end up in the same
+ * runner. A drop is the harder half: directory trees only reach us through
+ * webkitGetAsEntry, and the DataTransfer is emptied the moment the drop
+ * handler returns — so the entry handles are taken synchronously and walked
+ * afterwards. */
+
+const UPLOAD_CONCURRENCY = 4;
+const BIG_UPLOAD_FILES = 50;
+const BIG_UPLOAD_BYTES = 250 * 1024 * 1024;
+
+function wireDropZone(id) {
+  guardWindowDrops();
+  const zone = $("#fm-drop");
+  let depth = 0;   // dragenter/leave also fire for every child, so count them
+  let dest = "";
+
+  const carriesFiles = (e) => [...(e.dataTransfer?.types || [])].includes("Files");
+  const clear = () => {
+    depth = 0;
+    zone.classList.remove("dropping");
+    $$(".file-row.drop-into", zone).forEach((r) => r.classList.remove("drop-into"));
+  };
+  // Dropping on a folder row puts things inside that folder; anywhere else in
+  // the pane means the folder currently open.
+  const targetOf = (node) => {
+    const row = node && node.closest ? node.closest(".file-row[data-i]") : null;
+    const entry = row && fmRows[Number(row.dataset.i)];
+    return entry && entry.dir ? { dir: entry.path, row } : { dir: fmDir, row: null };
+  };
+
+  zone.addEventListener("dragenter", (e) => {
+    if (!carriesFiles(e)) return;
+    e.preventDefault();
+    depth++;
+    zone.classList.add("dropping");
+  });
+  zone.addEventListener("dragover", (e) => {
+    if (!carriesFiles(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+    const t = targetOf(e.target);
+    dest = t.dir;
+    $$(".file-row.drop-into", zone).forEach((r) => r !== t.row && r.classList.remove("drop-into"));
+    if (t.row) t.row.classList.add("drop-into");
+    $("#fm-drop-label").textContent = `Drop to upload into ${dirLabel(dest)}`;
+  });
+  zone.addEventListener("dragleave", (e) => {
+    if (!carriesFiles(e)) return;
+    if (--depth <= 0) clear();
+  });
+  zone.addEventListener("drop", (e) => {
+    if (!carriesFiles(e)) return;
+    e.preventDefault();
+    const into = dest;
+    clear();
+    const entries = [...(e.dataTransfer.items || [])]
+      .filter((i) => i.kind === "file")
+      .map((i) => (i.webkitGetAsEntry ? i.webkitGetAsEntry() : null))
+      .filter(Boolean);
+    const flat = [...(e.dataTransfer.files || [])].map((f) => ({ file: f, rel: f.name }));
+    collectDrop(id, into, entries, flat);
+  });
+}
+
+// A file dropped anywhere outside the zone would otherwise be opened by the
+// browser, throwing away the panel and whatever was on screen. Registered once.
+let fmWindowGuard = false;
+function guardWindowDrops() {
+  if (fmWindowGuard) return;
+  fmWindowGuard = true;
+  for (const ev of ["dragover", "drop"])
+    window.addEventListener(ev, (e) => {
+      if (!e.target.closest || !e.target.closest("#fm-drop")) e.preventDefault();
+    });
+}
+
+async function collectDrop(id, dest, entries, flat) {
+  if (!entries.length) return flat.length && runUpload(id, dest, flat, []);
+  const files = [], dirs = [];
+  for (const entry of entries) await walkEntry(entry, "", files, dirs);
+  if (!files.length && !dirs.length) return toast("Nothing in that drop.", "");
+  runUpload(id, dest, files, dirs);
+}
+
+// Depth-first walk of one dropped entry. readEntries hands back at most a
+// hundred children per call, so it has to be drained in a loop.
+function walkEntry(entry, prefix, files, dirs) {
+  const rel = prefix ? prefix + "/" + entry.name : entry.name;
+  if (entry.isFile)
+    return new Promise((res) => entry.file((f) => { files.push({ file: f, rel }); res(); }, () => res()));
+  dirs.push(rel);
+  const reader = entry.createReader();
+  return new Promise((res) => {
+    const batch = () => reader.readEntries(async (kids) => {
+      if (!kids.length) return res();
+      for (const k of kids) await walkEntry(k, rel, files, dirs);
+      batch();
+    }, () => res());
+    batch();
+  });
+}
+
+function showUploadProgress(done, total, label) {
+  const p = $("#fm-prog");
+  if (!p) return;
+  p.hidden = false;
+  $("#fm-prog-fill").style.width = total ? ((done / total) * 100).toFixed(1) + "%" : "0%";
+  $("#fm-prog-text").textContent = `Uploading ${done} of ${total} · ${label}`;
+}
+
+async function runUpload(id, dest, files, dirs) {
+  const bytes = files.reduce((n, f) => n + (f.file.size || 0), 0);
+  // A dropped world folder is tens of thousands of files. Say what is about to
+  // go over the wire before it starts, not after.
+  if (files.length > BIG_UPLOAD_FILES || bytes > BIG_UPLOAD_BYTES) {
+    const ok = await confirmDialog("Upload this?",
+      `<p><b>${files.length}</b> file${files.length === 1 ? "" : "s"} (${fmtBytes(bytes)}) into <b class="mono">${esc(dirLabel(dest))}</b>.</p>
+       <p class="muted">Folders keep their structure. Files already there are overwritten.</p>`,
+      "Upload", false);
+    if (!ok) return;
+  }
+
+  const queue = files.slice();
+  const errors = [];
+  let done = 0;
+  showUploadProgress(0, files.length, "starting…");
+
+  const worker = async () => {
+    while (queue.length) {
+      const item = queue.shift();
+      try {
+        const r = await fetch(
+          `/api/servers/${id}/upload?path=${encodeURIComponent(dest)}&name=${encodeURIComponent(item.rel)}`,
+          { method: "POST", body: item.file });
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`);
+      } catch (e) {
+        errors.push({ path: item.rel, error: e.message });
+      }
+      showUploadProgress(++done, files.length, item.rel);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(UPLOAD_CONCURRENCY, files.length) }, worker));
+
+  // Folders that held no files at all would otherwise vanish, since a file
+  // upload is what creates the directories on the way to it.
+  const empties = dirs.filter((d) => !files.some((f) => f.rel === d || f.rel.startsWith(d + "/")));
+  for (const d of empties) {
+    try { await API.post(`/api/servers/${id}/mkdir`, { path: joinPath(dest, d) }); }
+    catch (e) { errors.push({ path: d, error: e.message }); }
+  }
+
+  const prog = $("#fm-prog");
+  if (prog) prog.hidden = true;
+  reportBatch({ done: files.length - errors.length, errors }, "Uploaded");
+  refreshFiles(id);
+}
 
 async function loadDir(id, dir) {
   const table = $("#fm-table"), crumb = $("#fm-crumb");
@@ -1876,7 +2048,7 @@ async function deepSearch(id) {
   const q = fmQuery.trim();
   if (!q) return;
   const table = $("#fm-table");
-  table.innerHTML = `<div class="file-row"><span class="muted"><span class="spinner"></span> Searching every folder below /${esc(fmDir)}…</span></div>`;
+  table.innerHTML = `<div class="file-row"><span class="muted"><span class="spinner"></span> Searching every folder below ${esc(dirLabel(fmDir))}…</span></div>`;
   try {
     fmDeep = await API.get(`/api/servers/${id}/search?path=${encodeURIComponent(fmDir)}&q=${encodeURIComponent(q)}`);
     paintFiles(id);
@@ -1985,7 +2157,7 @@ function syncSelection() {
   $("#fm-count").textContent = n
     ? `${n} selected`
     : fmDeep
-      ? `${fmRows.length} match${fmRows.length === 1 ? "" : "es"} under /${fmDir}`
+      ? `${fmRows.length} match${fmRows.length === 1 ? "" : "es"} under ${dirLabel(fmDir)}`
       : fmQuery.trim()
         ? `${fmRows.length} of ${total} item${total === 1 ? "" : "s"}`
         : `${total} item${total === 1 ? "" : "s"}`;

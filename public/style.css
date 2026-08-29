@@ -414,6 +414,30 @@ select { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmln
 .fm-list { margin: 10px 0 0; padding-left: 20px; font-size: 12.5px; line-height: 1.7; }
 .fp-list { max-height: 42vh; overflow-y: auto; }
 
+/* Drag and drop. The veil sits over the whole pane while a drag is in flight,
+   but never takes pointer events — the rows underneath still need to see the
+   dragover that decides which folder is the target. */
+.fm-drop { position: relative; }
+.fm-drop-veil {
+  position: absolute; inset: 0; display: none; place-items: center; pointer-events: none;
+  border: 1px dashed var(--accent); border-radius: var(--radius);
+  background: rgba(79, 138, 91, 0.07); backdrop-filter: blur(1px); z-index: 3;
+}
+.fm-drop.dropping .fm-drop-veil { display: grid; }
+.fm-drop-veil span {
+  font-family: var(--mono); font-size: 12.5px; color: var(--accent-2);
+  background: var(--bg); border: 1px solid var(--accent-line);
+  border-radius: var(--radius-sm); padding: 8px 14px;
+}
+.file-row.drop-into { background: var(--accent-soft); box-shadow: inset 2px 0 0 var(--accent); }
+
+/* Upload progress. One bar for the whole batch: a folder drop is hundreds of
+   requests, and a toast per file would bury everything else. */
+.fm-prog { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.fm-prog-track { flex: 1; height: 4px; background: var(--panel-3); border-radius: 2px; overflow: hidden; }
+.fm-prog-track i { display: block; height: 100%; width: 0; background: var(--accent); transition: width 0.15s linear; }
+.fm-prog-text { font-size: 11.5px; color: var(--muted); font-family: var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 46%; }
+
 /* ------------------------------------------------------------------- banner */
 /* Text banners are a block so a mono span mid-sentence doesn't become its
  * own flex item; only banners carrying an action row lay out as a row. */
