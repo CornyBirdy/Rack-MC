@@ -1318,7 +1318,14 @@ async function renderContentTab(id) {
         <h3>${esc(content.noun)} <span class="muted" id="md-count"></span></h3>
         <p class="muted">Installed into <span class="mono">${esc(content.folder === "datapacks" ? "world/datapacks" : content.folder)}/</span> · ${esc(cap(content.loader))} · Minecraft ${esc(s.mc)}</p>
       </div>
-      <button class="btn btn-sm" id="md-upd">↻ Check for updates</button>
+      <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+        <div class="fm-find">
+          ${ico("search")}
+          <input type="text" id="md-filter" placeholder="Filter installed…" autocomplete="off" spellcheck="false" />
+          <button class="fm-x" id="md-filter-clear" title="Clear filter" hidden>×</button>
+        </div>
+        <button class="btn btn-sm" id="md-upd">↻ Check for updates</button>
+      </div>
     </div>
     <div id="md-installed"></div>
 
@@ -1343,6 +1350,8 @@ async function renderContentTab(id) {
   // Locked by default: only things that fit this server. Each lock can be
   // opened individually, so you can go looking for a mod the filters hid.
   state.mdFilters = { loader: true, mc: true, server: true };
+  state.mdQuery = "";
+  state.mdUpdates = new Map();
   renderFilters(id);
 
   await loadInstalled(id);
@@ -1353,6 +1362,17 @@ async function renderContentTab(id) {
   q.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); clearTimeout(timer); browse(id, 0); } };
   $("#md-sort").onchange = () => browse(id, 0);
   $("#md-upd").onclick = () => checkUpdates(id);
+
+  // Filtering what is already installed is a local matter — the list is
+  // already in hand, so it narrows on every keystroke with no request.
+  const mf = $("#md-filter");
+  mf.oninput = () => {
+    state.mdQuery = mf.value;
+    $("#md-filter-clear").hidden = !mf.value;
+    paintInstalled(id);
+  };
+  mf.onkeydown = (e) => { if (e.key === "Escape") { mf.value = ""; mf.oninput(); } };
+  $("#md-filter-clear").onclick = () => { mf.value = ""; mf.oninput(); mf.focus(); };
   browse(id, 0);
 }
 
@@ -1425,30 +1445,47 @@ async function loadInstalled(id) {
     return;
   }
   state.content = data;
-  const total = data.items.length + data.unmanaged.length;
-  const count = $("#md-count");
-  if (count) count.textContent = total ? `· ${total} installed` : "";
+  paintInstalled(id);
+}
 
-  const packRow = data.pack
-    ? `<div class="file-row md-item" data-slug="${esc(data.pack.projectId || "")}">
+// Draws the installed list from what is already in state, so the filter box and
+// the update badges can both repaint without going back to the server.
+function paintInstalled(id) {
+  const box = $("#md-installed");
+  const data = state.content;
+  if (!box || !data) return;
+
+  const q = (state.mdQuery || "").trim().toLowerCase();
+  const hit = (...fields) => !q || fields.some((f) => String(f || "").toLowerCase().includes(q));
+  const items = data.items.filter((it) => hit(it.title, it.file, it.versionNumber));
+  const unmanaged = data.unmanaged.filter((u) => hit(u.name, u.file));
+  const pack = data.pack && hit(data.pack.name, data.pack.versionNumber) ? data.pack : null;
+
+  const total = data.items.length + data.unmanaged.length;
+  const shown = items.length + unmanaged.length;
+  const count = $("#md-count");
+  if (count) count.textContent = !total ? "" : q ? `· ${shown} of ${total} installed` : `· ${total} installed`;
+
+  const packRow = pack
+    ? `<div class="file-row md-item" data-slug="${esc(pack.projectId || "")}">
          <span class="fic">${ico("box")}</span>
-         <span class="fname"><b>${esc(data.pack.name)}</b> ${esc(data.pack.versionNumber || "")}
-           <span class="muted">modpack · ${data.pack.files} files installed with the server</span></span>
+         <span class="fname"><b>${esc(pack.name)}</b> ${esc(pack.versionNumber || "")}
+           <span class="muted">modpack · ${pack.files} files installed with the server</span></span>
        </div>`
     : "";
 
-  const rows = data.items.map((it) => `
+  const rows = items.map((it) => `
     <div class="file-row md-item" data-slug="${esc(it.slug || "")}">
       <span class="fic">${it.icon ? `<img class="md-ic" src="${esc(it.icon)}" alt="" loading="lazy" />` : ico("layers")}</span>
       <span class="fname">
         <a href="https://modrinth.com/project/${esc(it.slug)}" target="_blank" rel="noopener">${esc(it.title)}</a>
         <span class="muted">${esc(it.versionNumber || it.file.split("/").pop())}${it.fromPack ? " · from the modpack" : it.dependency ? " · dependency" : ""} · ${fmtBytes(it.size)}</span>
       </span>
-      <span class="md-upd-slot" data-project="${esc(it.projectId)}"></span>
+      <span class="md-upd-slot" data-project="${esc(it.projectId)}">${updateButtonHTML(state.mdUpdates && state.mdUpdates.get(it.projectId))}</span>
       <span class="fdel" data-del="${esc(it.file)}" title="Remove">${ico("trash")}</span>
     </div>`).join("");
 
-  const loose = data.unmanaged.map((u) => `
+  const loose = unmanaged.map((u) => `
     <div class="file-row">
       <span class="fic">${ico("file")}</span>
       <span class="fname">${esc(u.name)} <span class="muted">added by hand · ${fmtBytes(u.size)}</span></span>
@@ -1457,9 +1494,13 @@ async function loadInstalled(id) {
 
   box.innerHTML = packRow || rows || loose
     ? `<div class="file-table">${packRow}${rows}${loose}</div>`
-    : `<div class="pk-empty">Nothing installed yet — search below to add some.</div>`;
+    : q
+      ? `<div class="pk-empty">Nothing installed matches “${esc(state.mdQuery.trim())}”.</div>`
+      : `<div class="pk-empty">Nothing installed yet — search below to add some.</div>`;
 
   bindModrinthLinks(box);
+  $$(".md-upd-slot [data-up]", box).forEach((b) => (b.onclick = (ev) =>
+    installContent(id, { versionId: b.dataset.up }, ev.currentTarget)));
   $$("[data-del]", box).forEach((el) => (el.onclick = async () => {
     const file = el.dataset.del;
     if (!(await confirmDialog("Remove?",
@@ -1708,21 +1749,25 @@ async function openVersionPicker(id, projectId) {
   }
 }
 
+function updateButtonHTML(u) {
+  return u
+    ? `<button class="btn btn-sm btn-primary" data-up="${esc(u.versionId)}" title="${esc(u.from)} → ${esc(u.to)}">Update to ${esc(u.to)}</button>`
+    : "";
+}
+
 async function checkUpdates(id) {
   const btn = $("#md-upd");
   btn.disabled = true;
   btn.textContent = "↻ Checking…";
   try {
     const { updates } = await API.get(`/api/servers/${id}/content/updates`);
-    $$(".md-upd-slot").forEach((el) => (el.innerHTML = ""));
-    if (!updates.length) toast("Everything is up to date.", "ok");
-    for (const u of updates) {
-      const slot = $(`.md-upd-slot[data-project="${u.projectId}"]`);
-      if (!slot) continue;
-      slot.innerHTML = `<button class="btn btn-sm btn-primary" data-up="${esc(u.versionId)}" title="${esc(u.from)} → ${esc(u.to)}">Update to ${esc(u.to)}</button>`;
-      slot.firstElementChild.onclick = (ev) => installContent(id, { versionId: u.versionId }, ev.currentTarget);
-    }
-    if (updates.length) toast(`${updates.length} update${updates.length === 1 ? "" : "s"} available.`, "ok");
+    // Held in state, not written straight into the DOM, so filtering the list
+    // afterwards redraws the badges instead of losing them.
+    state.mdUpdates = new Map(updates.map((u) => [u.projectId, u]));
+    paintInstalled(id);
+    toast(updates.length
+      ? `${updates.length} update${updates.length === 1 ? "" : "s"} available.`
+      : "Everything is up to date.", "ok");
   } catch (e) {
     toast(e.message, "err");
   }
@@ -1731,11 +1776,36 @@ async function checkUpdates(id) {
 }
 
 /* ------------------------------------------------------------- files tab */
+/* The table does three jobs at once: browse, search, and multi-select.
+ *
+ * Selection is by full path and lives for one view only — changing folder or
+ * running a new search drops it — because a batch spanning places the table
+ * isn't showing can't be reviewed before it runs, and a delete you can't see
+ * is a delete you didn't mean.
+ *
+ * Search filters the open folder as you type; Enter widens it to a recursive
+ * walk of everything below. Editing the box afterwards falls back to the local
+ * filter, so the rows on screen always match the text in the box. */
+let fmDir = "";          // folder currently open
+let fmEntries = [];      // raw listing of fmDir
+let fmDeep = null;       // recursive search payload, or null while browsing
+let fmQuery = "";        // text in the search box
+let fmRows = [];         // entries on screen, in display order
+let fmSel = new Set();   // paths ticked, relative to the server folder
+let fmAnchor = null;     // index of the last row touched, for shift-click
+
 async function renderFilesTab(id, dir = "") {
   const body = $("#tab-body");
+  fmQuery = "";
+  fmDeep = null;
   body.innerHTML = `
     <div class="fm-bar">
       <div class="breadcrumb" id="fm-crumb"></div>
+      <div class="fm-find">
+        ${ico("search")}
+        <input type="text" id="fm-q" placeholder="Search this folder…" autocomplete="off" spellcheck="false" />
+        <button class="fm-x" id="fm-q-clear" title="Clear search" hidden>×</button>
+      </div>
       <div style="margin-left:auto;display:flex;gap:8px">
         <button class="btn btn-sm" id="fm-mkdir">${ico("folder")} New folder</button>
         <label class="btn btn-sm btn-primary" style="cursor:pointer">${ico("upload")} Upload
@@ -1744,57 +1814,270 @@ async function renderFilesTab(id, dir = "") {
       </div>
     </div>
     <div class="file-table" id="fm-table"></div>
-    <p class="hint" style="margin-top:10px">Drop mods into <span class="mono">mods/</span>, plugins into <span class="mono">plugins/</span>, datapacks into <span class="mono">world/datapacks/</span> — or install them from Modrinth in the previous tab.</p>`;
+    <p class="hint" style="margin-top:10px">Tick rows to delete or move several at once — shift-click extends the selection. Drop mods into <span class="mono">mods/</span>, plugins into <span class="mono">plugins/</span>, datapacks into <span class="mono">world/datapacks/</span> — or install them from Modrinth in the previous tab.</p>`;
 
-  await loadDir(id, dir);
+  const q = $("#fm-q");
+  q.oninput = () => {
+    fmQuery = q.value;
+    fmDeep = null;               // the box no longer matches the deep results
+    $("#fm-q-clear").hidden = !fmQuery;
+    paintFiles(id);
+  };
+  q.onkeydown = (e) => {
+    if (e.key === "Enter") { e.preventDefault(); deepSearch(id); }
+    if (e.key === "Escape") { q.value = ""; q.oninput(); }
+  };
+  $("#fm-q-clear").onclick = () => { q.value = ""; q.oninput(); q.focus(); };
+
   $("#fm-mkdir").onclick = async () => {
     const name = prompt("New folder name:");
     if (!name) return;
-    try { await API.post(`/api/servers/${id}/mkdir`, { path: joinPath(dir, name) }); loadDir(id, dir); }
+    try { await API.post(`/api/servers/${id}/mkdir`, { path: joinPath(fmDir, name) }); loadDir(id, fmDir); }
     catch (e) { toast(e.message, "err"); }
   };
   $("#fm-upload").onchange = async (ev) => {
     for (const file of ev.target.files) {
       try {
-        await fetch(`/api/servers/${id}/upload?path=${encodeURIComponent(dir)}&name=${encodeURIComponent(file.name)}`, { method: "POST", body: file });
+        await fetch(`/api/servers/${id}/upload?path=${encodeURIComponent(fmDir)}&name=${encodeURIComponent(file.name)}`, { method: "POST", body: file });
         toast(`Uploaded ${file.name}`, "ok");
       } catch (e) { toast(`Upload failed: ${file.name}`, "err"); }
     }
-    loadDir(id, dir);
+    loadDir(id, fmDir);
   };
+
+  await loadDir(id, dir);
 }
 
 function joinPath(a, b) { return (a ? a + "/" : "") + b; }
+function parentOf(p) { const i = p.lastIndexOf("/"); return i < 0 ? "" : p.slice(0, i); }
 
 async function loadDir(id, dir) {
   const table = $("#fm-table"), crumb = $("#fm-crumb");
+  fmDir = dir;
+  fmDeep = null;
   try {
     const data = await API.get(`/api/servers/${id}/files?path=${encodeURIComponent(dir)}`);
     const parts = dir ? dir.split("/") : [];
     crumb.innerHTML = `<a data-p="">⌂ root</a>` + parts.map((p, i) =>
       ` / <a data-p="${esc(parts.slice(0, i + 1).join("/"))}">${esc(p)}</a>`).join("");
     $$("#fm-crumb a").forEach((a) => (a.onclick = () => renderFilesTab(id, a.dataset.p)));
-
-    table.innerHTML = data.entries.length ? data.entries.map((e) => `
-      <div class="file-row">
-        <span class="fic">${e.dir ? ico("folder") : fileIcon(e.name)}</span>
-        <span class="fname ${e.dir ? "dir" : ""}" data-name="${esc(e.name)}" data-dir="${e.dir}">${esc(e.name)}</span>
-        <span class="fsize">${e.dir ? "" : fmtBytes(e.size)}</span>
-        <span class="fdel" data-name="${esc(e.name)}" title="Delete">${ico("trash")}</span>
-      </div>`).join("") : `<div class="file-row"><span class="muted" style="padding:4px">Empty folder.</span></div>`;
-
-    $$("#fm-table .fname").forEach((el) => (el.onclick = () => {
-      if (el.dataset.dir === "true") renderFilesTab(id, joinPath(dir, el.dataset.name));
-      else openFileEditor(id, joinPath(dir, el.dataset.name), el.dataset.name);
-    }));
-    $$("#fm-table .fdel").forEach((el) => (el.onclick = async () => {
-      if (!(await confirmDialog("Delete?", `<p>Delete <b class="mono">${esc(el.dataset.name)}</b>?</p>`, "Delete"))) return;
-      try { await API.del(`/api/servers/${id}/file?path=${encodeURIComponent(joinPath(dir, el.dataset.name))}`); loadDir(id, dir); }
-      catch (e) { toast(e.message, "err"); }
-    }));
+    fmEntries = data.entries.map((e) => ({ ...e, path: joinPath(dir, e.name) }));
+    paintFiles(id);
   } catch (e) {
+    fmEntries = [];
     table.innerHTML = `<div class="file-row"><span class="muted">${esc(e.message)}</span></div>`;
   }
+}
+
+// Walk everything below the open folder. Kept behind Enter rather than run on
+// every keystroke: a world folder is tens of thousands of files, and that walk
+// is not something to fire off four times a second.
+async function deepSearch(id) {
+  const q = fmQuery.trim();
+  if (!q) return;
+  const table = $("#fm-table");
+  table.innerHTML = `<div class="file-row"><span class="muted"><span class="spinner"></span> Searching every folder below /${esc(fmDir)}…</span></div>`;
+  try {
+    fmDeep = await API.get(`/api/servers/${id}/search?path=${encodeURIComponent(fmDir)}&q=${encodeURIComponent(q)}`);
+    paintFiles(id);
+  } catch (e) {
+    fmDeep = null;
+    toast(e.message, "err");
+    paintFiles(id);
+  }
+}
+
+function paintFiles(id) {
+  const table = $("#fm-table");
+  if (!table) return;
+  const q = fmQuery.trim().toLowerCase();
+  const src = fmDeep ? fmDeep.entries : fmEntries;
+  fmRows = q ? src.filter((e) => e.name.toLowerCase().includes(q)) : src;
+  fmSel = new Set();
+  fmAnchor = null;
+
+  const head = `
+    <div class="file-row file-head">
+      <label class="fcheck"><input type="checkbox" id="fm-all" ${fmRows.length ? "" : "disabled"} /></label>
+      <span class="fhead-label" id="fm-count"></span>
+      <div class="fhead-acts" id="fm-acts" hidden>
+        <button class="btn btn-sm" id="fm-move">${ico("folder")} Move to…</button>
+        <button class="btn btn-sm btn-red" id="fm-del-sel">${ico("trash")} Delete</button>
+        <button class="btn btn-sm btn-ghost" id="fm-clear">Clear</button>
+      </div>
+      <button class="btn btn-sm btn-ghost" id="fm-deep" ${q && !fmDeep ? "" : "hidden"}>${ico("search")} All sub-folders ⏎</button>
+    </div>`;
+
+  const rows = fmRows.map((e, i) => `
+    <div class="file-row" data-i="${i}">
+      <label class="fcheck"><input type="checkbox" class="fsel" data-i="${i}" /></label>
+      <span class="fic">${e.dir ? ico("folder") : fileIcon(e.name)}</span>
+      <span class="fname ${e.dir ? "dir" : ""}" data-i="${i}">${esc(e.name)}${
+        fmDeep && parentOf(e.path) !== fmDir ? `<span class="fpath">in /${esc(parentOf(e.path))}</span>` : ""}</span>
+      <span class="fsize">${e.dir ? "" : fmtBytes(e.size)}</span>
+      <span class="fdel" data-i="${i}" title="Delete">${ico("trash")}</span>
+    </div>`).join("");
+
+  const empty = q
+    ? `<div class="file-row"><span class="muted" style="padding:4px">Nothing here matches “${esc(fmQuery.trim())}”.${fmDeep ? "" : " Press Enter to search every folder below."}</span></div>`
+    : `<div class="file-row"><span class="muted" style="padding:4px">Empty folder.</span></div>`;
+
+  table.innerHTML = head + (fmRows.length ? rows : empty) +
+    (fmDeep && fmDeep.truncated
+      ? `<div class="file-row"><span class="muted" style="padding:4px">Only the first ${fmDeep.entries.length} matches are listed — narrow the search to see the rest.</span></div>`
+      : "");
+
+  $$("#fm-table .fname").forEach((el) => (el.onclick = () => {
+    const e = fmRows[Number(el.dataset.i)];
+    if (e.dir) renderFilesTab(id, e.path);
+    else openFileEditor(id, e.path, e.name);
+  }));
+  $$("#fm-table .fdel").forEach((el) => (el.onclick = async () => {
+    const e = fmRows[Number(el.dataset.i)];
+    if (!(await confirmDialog("Delete?", `<p>Delete <b class="mono">${esc(e.path)}</b>?</p>`, "Delete"))) return;
+    try { await API.del(`/api/servers/${id}/file?path=${encodeURIComponent(e.path)}`); refreshFiles(id); }
+    catch (err) { toast(err.message, "err"); }
+  }));
+
+  // A plain click toggles one row; shift-click paints every row between here
+  // and the last one touched with whatever state this click landed on.
+  $$("#fm-table .fsel").forEach((cb) => (cb.onclick = (ev) => {
+    const i = Number(cb.dataset.i), on = cb.checked;
+    const from = ev.shiftKey && fmAnchor !== null ? fmAnchor : i;
+    for (let k = Math.min(from, i); k <= Math.max(from, i); k++) {
+      if (on) fmSel.add(fmRows[k].path); else fmSel.delete(fmRows[k].path);
+    }
+    fmAnchor = i;
+    syncSelection();
+  }));
+  $("#fm-all").onclick = () => {
+    fmSel = $("#fm-all").checked ? new Set(fmRows.map((e) => e.path)) : new Set();
+    fmAnchor = null;
+    syncSelection();
+  };
+  $("#fm-clear").onclick = () => { fmSel = new Set(); fmAnchor = null; syncSelection(); };
+  $("#fm-del-sel").onclick = () => deleteSelection(id);
+  $("#fm-move").onclick = () => moveSelection(id);
+  $("#fm-deep").onclick = () => deepSearch(id);
+  syncSelection();
+}
+
+// After a change, come back the way we came: re-run the search if one is on
+// screen, otherwise just reload the folder.
+function refreshFiles(id) {
+  if (fmDeep) return deepSearch(id);
+  return loadDir(id, fmDir);
+}
+
+// Repaint everything that depends on the selection without rebuilding the
+// rows, so ticking a box costs no round trip and keeps the scroll position.
+function syncSelection() {
+  const n = fmSel.size;
+  $$("#fm-table .fsel").forEach((cb) => {
+    const on = fmSel.has(fmRows[Number(cb.dataset.i)].path);
+    cb.checked = on;
+    cb.closest(".file-row").classList.toggle("sel", on);
+  });
+  const all = $("#fm-all");
+  all.checked = n > 0 && n === fmRows.length;
+  all.indeterminate = n > 0 && n < fmRows.length;
+  const total = fmDeep ? fmDeep.entries.length : fmEntries.length;
+  $("#fm-count").textContent = n
+    ? `${n} selected`
+    : fmDeep
+      ? `${fmRows.length} match${fmRows.length === 1 ? "" : "es"} under /${fmDir}`
+      : fmQuery.trim()
+        ? `${fmRows.length} of ${total} item${total === 1 ? "" : "s"}`
+        : `${total} item${total === 1 ? "" : "s"}`;
+  $("#fm-acts").hidden = !n;
+  $("#fm-deep").hidden = !(fmQuery.trim() && !fmDeep) || !!n;
+}
+
+// A batch runs entry by entry, so it can half-succeed. Say how far it got and
+// why the rest stayed, rather than reporting a flat failure.
+function reportBatch(out, verb) {
+  const bad = out.errors || [];
+  if (!bad.length) return toast(`${verb} ${out.done} item${out.done === 1 ? "" : "s"}.`, "ok");
+  toast(`${verb} ${out.done}, ${bad.length} left: ${bad[0].error}`, out.done ? "" : "err");
+}
+
+async function deleteSelection(id) {
+  const paths = [...fmSel];
+  const shown = paths.slice(0, 8).map((p) => `<li class="mono">${esc(p)}</li>`).join("");
+  const more = paths.length > 8 ? `<li class="muted">…and ${paths.length - 8} more</li>` : "";
+  const ok = await confirmDialog("Delete selection?",
+    `<p>Delete these ${paths.length} item${paths.length === 1 ? "" : "s"}? Folders go with everything inside them, and this can't be undone.</p>
+     <ul class="fm-list">${shown}${more}</ul>`, "Delete");
+  if (!ok) return;
+  try {
+    reportBatch(await API.post(`/api/servers/${id}/delete`, { paths }), "Deleted");
+    refreshFiles(id);
+  } catch (e) { toast(e.message, "err"); }
+}
+
+async function moveSelection(id) {
+  const paths = [...fmSel];
+  const dest = await pickFolder(id, paths);
+  if (dest === null) return;
+  try {
+    reportBatch(await API.post(`/api/servers/${id}/move`, { paths, dest }), "Moved");
+    refreshFiles(id);
+  } catch (e) { toast(e.message, "err"); }
+}
+
+/* The destination picker browses the same sandbox the file table does, but
+ * shows folders only. Anything in the selection is hidden from the list, since
+ * dropping a folder inside itself would orphan its whole subtree. */
+async function pickFolder(id, moving) {
+  return new Promise((resolve) => {
+    let cur = "";
+    const blocked = (p) => moving.some((m) => p === m || p.startsWith(m + "/"));
+    // Every entry already sitting in the folder it would move to is a no-op,
+    // so "Move here" is only offered where it would actually change something.
+    const pointless = () => moving.every((m) => parentOf(m) === cur);
+    modal(`
+      <div class="modal-head"><h2>Move ${moving.length} item${moving.length === 1 ? "" : "s"}</h2><button class="modal-close">×</button></div>
+      <div class="modal-body">
+        <div class="breadcrumb" id="fp-crumb"></div>
+        <div class="file-table fp-list" id="fp-list"></div>
+        <p class="hint" style="margin-top:10px">Open a folder to move into it. Names are kept as they are.</p>
+      </div>
+      <div class="modal-foot"><span class="mono muted" id="fp-dest"></span>
+        <div style="display:flex;gap:10px">
+          <button class="btn btn-ghost" data-x>Cancel</button>
+          <button class="btn btn-primary" id="fp-ok">Move here</button>
+        </div>
+      </div>`);
+    const finish = (v) => { closeModal(); resolve(v); };
+    $(".modal-close").onclick = $("[data-x]").onclick = () => finish(null);
+    $("#fp-ok").onclick = () => finish(cur);
+    draw();
+
+    async function draw() {
+      const list = $("#fp-list");
+      const parts = cur ? cur.split("/") : [];
+      $("#fp-crumb").innerHTML = `<a data-p="">⌂ root</a>` + parts.map((p, i) =>
+        ` / <a data-p="${esc(parts.slice(0, i + 1).join("/"))}">${esc(p)}</a>`).join("");
+      $$("#fp-crumb a").forEach((a) => (a.onclick = () => { cur = a.dataset.p; draw(); }));
+      $("#fp-dest").textContent = "→ /" + cur;
+      const ok = $("#fp-ok");
+      ok.disabled = pointless();
+      ok.title = ok.disabled ? "The selection is already in this folder" : "";
+      list.innerHTML = `<div class="file-row"><span class="muted">Loading…</span></div>`;
+      try {
+        const data = await API.get(`/api/servers/${id}/files?path=${encodeURIComponent(cur)}`);
+        const dirs = data.entries.filter((e) => e.dir && !blocked(joinPath(cur, e.name)));
+        list.innerHTML = dirs.length ? dirs.map((e) => `
+          <div class="file-row">
+            <span class="fic">${ico("folder")}</span>
+            <span class="fname dir" data-name="${esc(e.name)}">${esc(e.name)}</span>
+          </div>`).join("") : `<div class="file-row"><span class="muted" style="padding:4px">No sub-folders here.</span></div>`;
+        $$("#fp-list .fname").forEach((el) => (el.onclick = () => { cur = joinPath(cur, el.dataset.name); draw(); }));
+      } catch (e) {
+        list.innerHTML = `<div class="file-row"><span class="muted">${esc(e.message)}</span></div>`;
+      }
+    }
+  });
 }
 
 function fileIcon(name) {

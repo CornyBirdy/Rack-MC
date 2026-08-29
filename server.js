@@ -91,6 +91,15 @@ function cleanQuickCommands(list) {
     .map((q) => ({ label: String(q.label ?? "").trim().slice(0, 40), cmd: q.cmd.trim().slice(0, 256) }));
 }
 
+// Batch file operations take a list of paths; keep it a sane list of non-empty
+// strings before it reaches the file manager, which sandboxes each one itself.
+function asPathList(list) {
+  if (!Array.isArray(list)) throw new Error("Expected a list of paths");
+  const paths = list.filter((p) => typeof p === "string" && p.trim()).slice(0, 500);
+  if (!paths.length) throw new Error("Nothing selected");
+  return paths;
+}
+
 // Wrap async route handlers so thrown errors become 400s instead of crashes.
 function guard(fn) {
   return async (req, res, ctx) => {
@@ -456,6 +465,11 @@ const server = http.createServer(async (req, res) => {
       // file manager
       if (action === "files" && req.method === "GET")
         return guard(async () => sendJSON(res, 200, manager.listFiles(id, q.get("path") || "")))(req, res);
+      // GET /api/servers/:id/search?path=&q= — recursive name search
+      if (action === "search" && req.method === "GET")
+        return guard(async () =>
+          sendJSON(res, 200, manager.searchFiles(id, q.get("path") || "", q.get("q") || ""))
+        )(req, res);
       if (action === "file" && req.method === "GET")
         return guard(async () =>
           sendJSON(res, 200, { content: manager.readFile(id, q.get("path")) })
@@ -470,6 +484,20 @@ const server = http.createServer(async (req, res) => {
         return guard(async () => {
           manager.deleteFile(id, q.get("path"));
           sendJSON(res, 200, { ok: true });
+        })(req, res);
+      // POST /api/servers/:id/delete { paths: [] }  — batch delete
+      // POST /api/servers/:id/move   { paths: [], dest } — batch move
+      // Both answer with { done, errors: [{path, error}] } so a partly
+      // successful batch can be reported honestly instead of as a flat failure.
+      if (action === "delete" && req.method === "POST")
+        return guard(async () => {
+          const body = await readJSONBody(req);
+          sendJSON(res, 200, manager.deleteFiles(id, asPathList(body.paths)));
+        })(req, res);
+      if (action === "move" && req.method === "POST")
+        return guard(async () => {
+          const body = await readJSONBody(req);
+          sendJSON(res, 200, manager.moveFiles(id, asPathList(body.paths), String(body.dest || "")));
         })(req, res);
       if (action === "mkdir" && req.method === "POST")
         return guard(async () => {

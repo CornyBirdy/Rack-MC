@@ -38,6 +38,8 @@
 }
 
 * { box-sizing: border-box; }
+/* A flex/grid display would otherwise win over the hidden attribute. */
+[hidden] { display: none !important; }
 html, body { height: 100%; margin: 0; }
 body {
   font-family: var(--font);
@@ -383,6 +385,34 @@ select { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmln
 .file-row .fsize { color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
 .file-row .fdel { opacity: 0; color: var(--red); cursor: pointer; padding: 2px 6px; }
 .file-row:hover .fdel { opacity: 1; }
+.file-row .fpath { color: var(--muted-2); font-size: 11.5px; font-family: var(--mono); margin-left: 8px; }
+
+/* The search box carries its own icon, so it sits inside the field rather than
+   next to it and the bar stays one row of controls. */
+.fm-find { position: relative; display: flex; align-items: center; min-width: 180px; }
+.fm-find .i { position: absolute; left: 10px; width: 13px; height: 13px; color: var(--muted-2); pointer-events: none; }
+.fm-find input[type="text"] { width: 210px; padding: 7px 26px 7px 30px; font-size: 12.5px; margin: 0; }
+.fm-x {
+  position: absolute; right: 6px; background: none; border: 0; color: var(--muted); cursor: pointer;
+  font-size: 15px; line-height: 1; padding: 2px 4px; border-radius: var(--radius-xs);
+}
+.fm-x:hover { color: var(--text); background: var(--panel-2); }
+
+/* Multi-select: a header row that ticks the folder and turns into the batch
+   toolbar once anything is picked. */
+.file-row.file-head { background: var(--bg-2); color: var(--muted); font-size: 12px; padding: 7px 14px; min-height: 40px; flex-wrap: wrap; row-gap: 8px; }
+.file-row.file-head:hover { background: var(--bg-2); }
+.file-head .fhead-label { font-weight: 600; letter-spacing: 0.2px; }
+.file-head .fhead-acts { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.file-head > #fm-deep { margin-left: auto; }
+.fcheck { display: grid; place-items: center; width: 16px; flex-shrink: 0; }
+.fcheck input { width: 14px; height: 14px; margin: 0; cursor: pointer; accent-color: var(--accent); }
+.fcheck input:disabled { cursor: default; opacity: 0.4; }
+.file-row.sel { background: var(--accent-soft); }
+.file-row.sel:hover { background: var(--accent-soft); }
+.file-row.sel .fdel { opacity: 1; }
+.fm-list { margin: 10px 0 0; padding-left: 20px; font-size: 12.5px; line-height: 1.7; }
+.fp-list { max-height: 42vh; overflow-y: auto; }
 
 /* ------------------------------------------------------------------- banner */
 /* Text banners are a block so a mono span mid-sentence doesn't become its

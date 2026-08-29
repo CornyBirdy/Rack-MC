@@ -8,6 +8,31 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## 2026-08-29
 
+### Added
+
+- **Batch select in the file explorer.** Every row carries a checkbox, the
+  header row ticks the whole folder, and shift-click extends the selection from
+  the last row touched. With anything selected the header turns into a toolbar:
+  **Delete**, which confirms against a list of exactly what is about to go, and
+  **Move to…**, which opens a folder picker rooted at the server directory.
+  The picker hides any folder that is itself part of the selection, since
+  dropping a folder inside itself would orphan its subtree, and it won't offer
+  to move things into the folder they already sit in. Batches run entry by
+  entry on the server, so a locked file no longer takes the other eleven down
+  with it — the toast says how far it got and why the rest stayed.
+- **Search in the file explorer.** The box in the toolbar filters the open
+  folder as you type; Enter widens it to a recursive walk of everything below,
+  with each match showing the folder it was found in. Deleting or moving from
+  a set of search results re-runs the search rather than dumping you back at
+  the top. The walk is capped at 300 matches and 12 levels and says when it
+  stopped early — a world folder is tens of thousands of region files, and it
+  is not fired on every keystroke for the same reason.
+- **Filter the installed mod list.** The Mods tab had a search box for
+  Modrinth but none for what is already installed. There is one now, matching
+  on title, filename and version, and the update badges survive it — they are
+  held in state rather than written straight into the row, so filtering
+  redraws them instead of losing them.
+
 ### Changed
 
 - **Retheme.** The panel had drifted into the default dark-SaaS look — violet
