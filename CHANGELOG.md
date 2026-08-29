@@ -6,6 +6,38 @@ the day the work landed.
 
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-08-29
+
+### Changed
+
+- **Retheme.** The panel had drifted into the default dark-SaaS look — violet
+  accent, radial gradient blobs behind the page, gradient buttons, glowing
+  status dots, capsule badges everywhere and emoji standing in for icons. It
+  now reads as an infrastructure console: flat near-neutral graphite surfaces
+  with hairline borders, a single desaturated green accent used only for
+  chrome, rectangular badges and tags, and no gradient or glow anywhere. The
+  status colours (running / warning / failed) are the only saturated things
+  left on screen. Every palette value still comes from the tokens in
+  `:root`, so a future retheme is one block.
+- **A real icon set.** `public/icons.js` draws every panel icon as a 16×16
+  stroked SVG on `currentColor` — one grid, one stroke weight, no font and no
+  network fetch — replacing the emoji that were doing the job. Loaders keep
+  their identity as outlined two-letter tiles in their own colour, since a
+  monochrome glyph can't tell Fabric from Quilt.
+- **Servers no longer get an emoji assigned to them.** A new server starts with
+  no icon and shows its initial; the Settings field is still there if you want
+  to give it one.
+- **Native controls follow the theme.** `color-scheme: dark` covers selects and
+  checkboxes; the memory sliders are painted by hand because Chrome keeps the
+  unfilled half of a range track light whatever you tell it.
+
+### Fixed
+
+- Banners no longer break their own sentence. `.banner` was a flex row, so a
+  `<span class="mono">` mid-paragraph became its own flex item and the text
+  around it split into separate columns. Only banners carrying an action row
+  lay out as a row now.
+
 ## 2026-08-28
 
 ### Added

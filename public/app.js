@@ -58,6 +58,12 @@ function fmtUptime(ms) {
   return h ? `${h}h ${m}m` : m ? `${m}m ${sec}s` : `${sec}s`;
 }
 function fmtMem(mb) { return mb >= 1024 ? (mb / 1024).toFixed(1) + " GB" : mb + " MB"; }
+// Per-server avatar: the emoji from Settings if there is one, else an initial.
+function srvIcon(s) { return s && s.icon ? esc(s.icon) : initialTile(s && s.name); }
+// Fills the <span data-ico> placeholders in index.html's static markup.
+function hydrateIcons(root = document) {
+  $$("[data-ico]", root).forEach((el) => { el.innerHTML = ico(el.dataset.ico); el.removeAttribute("data-ico"); });
+}
 function fmtBytes(b) {
   if (b < 1024) return b + " B";
   const u = ["KB", "MB", "GB", "TB"]; let i = -1;
@@ -83,6 +89,22 @@ const statusLabel = (s) => STATUS_LABEL[viewStatus(s)] || viewStatus(s);
 // Online and paused both mean "the process is up" — worth a leading dot.
 const statusDot = (s) => (viewStatus(s) === "running" || viewStatus(s) === "paused" ? "● " : "");
 
+/*
+ * Range inputs are painted by hand. Chrome keeps the unfilled half of a native
+ * track light even under color-scheme: dark, which is the one control that
+ * would still glow white in this theme — so the track is a gradient driven by
+ * --fill, refreshed here whenever a slider moves or a new one is rendered.
+ */
+function paintRange(el) {
+  const min = Number(el.min || 0), max = Number(el.max || 100);
+  const pct = max > min ? ((Number(el.value) - min) / (max - min)) * 100 : 0;
+  el.style.setProperty("--fill", pct.toFixed(2) + "%");
+}
+function paintRanges(root = document) { $$('input[type="range"]', root).forEach(paintRange); }
+document.addEventListener("input", (e) => {
+  if (e.target.tagName === "INPUT" && e.target.type === "range") paintRange(e.target);
+});
+
 function toast(msg, kind = "") {
   const t = document.createElement("div");
   t.className = "toast " + kind;
@@ -107,6 +129,7 @@ function modal(html, { wide = false } = {}) {
   root.innerHTML = `<div class="modal-bg"><div class="modal ${wide ? "wide" : ""}">${html}</div></div>`;
   const bg = $(".modal-bg", root);
   bg.addEventListener("mousedown", (e) => { if (e.target === bg) closeModal(); });
+  paintRanges(root);
   return root;
 }
 function closeModal() { $("#modal-root").innerHTML = ""; }
@@ -135,7 +158,7 @@ function renderBuildBadge() {
 
 async function openChangelog() {
   modal(
-    `<div class="modal-head"><h2>📋 Changelog</h2><button class="modal-close">×</button></div>
+    `<div class="modal-head"><h2>Changelog</h2><button class="modal-close">×</button></div>
      <div class="modal-body"><div class="cl" id="cl-body"><p class="muted"><span class="spinner"></span> Loading…</p></div></div>
      <div class="modal-foot"><span class="muted" id="cl-build"></span><button class="btn btn-primary" data-x>Close</button></div>`,
     { wide: true }
@@ -213,6 +236,11 @@ async function confirmDialog(title, body, okText = "Confirm", danger = true) {
 
 /* ---------------------------------------------------------------- bootstrap */
 async function boot() {
+  // The shell in index.html carries data-ico placeholders; fill them before
+  // anything else so the sidebar never flashes empty boxes.
+  $("#brand-mark").innerHTML = ico("cube");
+  hydrateIcons();
+
   try {
     const b = await API.get("/api/bootstrap");
     state.loaders = b.loaders;
@@ -307,7 +335,7 @@ function renderSidebar() {
   list.innerHTML =
     servers.map((s) => `
       <div class="srv-mini ${state.route.id === s.id ? "active" : ""}" data-id="${s.id}">
-        <span class="emoji">${esc(s.icon || "🎮")}</span>
+        <span class="emoji">${srvIcon(s)}</span>
         <div class="meta">
           <div class="nm">${esc(s.name)}</div>
           <div class="sub">${esc(cap(s.loader))} · ${esc(s.mc || "")}</div>
@@ -498,7 +526,7 @@ function allocHTML() {
   const over = totalMB && allocMB > totalMB * 0.8;
   return `<span class="muted">${running.length} server${running.length === 1 ? "" : "s"} running ·
       <b>${gb(allocMB)} GB</b> of ${gb(totalMB)} GB allocated to Minecraft</span>
-    ${over ? `<span class="over">⚠ over-committed</span>` : ""}`;
+    ${over ? `<span class="over">${ico("alert")} over-committed</span>` : ""}`;
 }
 
 /* ---------------------------------------------------------------- dashboard */
@@ -531,22 +559,22 @@ function renderDashboard() {
 
 function emptyHTML() {
   return `<div class="empty">
-    <div class="big">⛏️</div>
+    <div class="big">${ico("cube")}</div>
     <h2>No servers yet</h2>
     <p>Spin up a vanilla or modded Minecraft server in a few clicks.</p>
-    <button class="btn btn-primary" id="empty-create"><span class="ic">＋</span> Create your first server</button>
+    <button class="btn btn-primary" id="empty-create">${ico("plus")} Create your first server</button>
   </div>`;
 }
 
 function cardHTML(s) {
   const busy = ["starting", "stopping", "installing"].includes(s.status);
   const primary = s.status === "running"
-    ? `<button class="btn btn-sm btn-red" data-act="stop" data-id="${s.id}">■ Stop</button>`
-    : `<button class="btn btn-sm btn-green" data-act="start" data-id="${s.id}" ${busy || s.status === "installing" ? "disabled" : ""}>▶ Start</button>`;
+    ? `<button class="btn btn-sm btn-red" data-act="stop" data-id="${s.id}">${ico("stop")} Stop</button>`
+    : `<button class="btn btn-sm btn-green" data-act="start" data-id="${s.id}" ${busy || s.status === "installing" ? "disabled" : ""}>${ico("play")} Start</button>`;
   return `
     <div class="card srv-card" data-id="${s.id}">
       <div class="srv-card-top">
-        <div class="srv-card-emoji">${esc(s.icon || "🎮")}</div>
+        <div class="srv-card-emoji">${srvIcon(s)}</div>
         <div class="srv-card-title">
           <h3>${esc(s.name)}</h3>
           <div class="row">
@@ -612,7 +640,7 @@ async function openCreateWizard() {
       <div class="loader-grid">
         ${state.loaders.map((l) => `
           <button class="loader-opt ${wiz.loader === l.id ? "sel" : ""}" data-l="${l.id}">
-            <span class="li">${loaderEmoji(l.id)}</span>
+            <span class="li">${loaderTile(l.id, 26)}</span>
             <span class="ltxt">
               <strong>${esc(l.label)}</strong>
               <span class="kind ${l.kind}">${KIND_LABEL[l.kind] || l.kind}</span>
@@ -756,8 +784,8 @@ async function openCreateWizard() {
       if (wiz.mc !== r.mc) return; // a newer request won
       wiz.javaReq = r;
       box.innerHTML = r.ok
-        ? `<div class="hint">☕ Minecraft ${esc(r.mc)} needs <b>Java ${r.required}</b> — will run on Java ${esc(r.java.version)}.</div>`
-        : `<div class="hint" style="color:var(--amber)">☕ Minecraft ${esc(r.mc)} needs <b>Java ${r.required}</b>, which isn't on this machine.
+        ? `<div class="hint">${ico("coffee")} Minecraft ${esc(r.mc)} needs <b>Java ${r.required}</b> — will run on Java ${esc(r.java.version)}.</div>`
+        : `<div class="hint" style="color:var(--amber)">${ico("coffee")} Minecraft ${esc(r.mc)} needs <b>Java ${r.required}</b>, which isn't on this machine.
              MC Hoster will download Eclipse Temurin ${r.required} automatically (~45 MB, once).
              <button class="btn btn-sm" id="java-now" style="margin-left:6px">Get it now</button></div>`;
       const btn = $("#java-now");
@@ -801,7 +829,7 @@ async function openCreateWizard() {
   }
 
   function renderDetailsStep() {
-    next.textContent = "🚀 Create Server";
+    next.textContent = "Create Server";
     next.disabled = false;
     const defMem = state.settings.defaultMemory || 4096;
     body.innerHTML = stepsBar() + `
@@ -830,16 +858,17 @@ async function openCreateWizard() {
       </div>
       <div class="summary-box muted" style="font-size:12.5px;background:var(--bg-2);border:1px solid var(--line);border-radius:8px;padding:12px">
         ${wiz.pack
-          ? `📦 <b style="color:var(--text)">${esc(wiz.pack.title)}</b> ${esc(wiz.packVersion ? wiz.packVersion.number : "")} · Minecraft <b style="color:var(--text)">${esc(wiz.mc)}</b> · ${esc((wiz.packVersion && wiz.packVersion.loaders[0]) || "")}
+          ? `${ico("box")} <b style="color:var(--text)">${esc(wiz.pack.title)}</b> ${esc(wiz.packVersion ? wiz.packVersion.number : "")} · Minecraft <b style="color:var(--text)">${esc(wiz.mc)}</b> · ${esc((wiz.packVersion && wiz.packVersion.loaders[0]) || "")}
              <div style="margin-top:6px">Its mods and configs are downloaded during setup — client-only mods are left out.</div>`
           : `<b style="color:var(--text)">${esc(cap(wiz.loader))}</b> · Minecraft <b style="color:var(--text)">${esc(wiz.mc)}</b>${wiz.build ? ` · build <b style="color:var(--text)">${esc(wiz.build)}</b>` : ""}`}
         ${wiz.javaReq
           ? wiz.javaReq.ok
-            ? `<div style="margin-top:8px">☕ Java ${wiz.javaReq.required} · using ${esc(wiz.javaReq.java.version)}</div>`
-            : `<div style="color:var(--amber);margin-top:8px">☕ Needs Java ${wiz.javaReq.required} — MC Hoster will download Eclipse Temurin ${wiz.javaReq.required} during setup.</div>`
+            ? `<div style="margin-top:8px">${ico("coffee")} Java ${wiz.javaReq.required} · using ${esc(wiz.javaReq.java.version)}</div>`
+            : `<div style="color:var(--amber);margin-top:8px">${ico("coffee")} Needs Java ${wiz.javaReq.required} — MC Hoster will download Eclipse Temurin ${wiz.javaReq.required} during setup.</div>`
           : ""}
       </div>`;
     const mem = $("#d-mem");
+    paintRange(mem);
     mem.oninput = () => ($("#d-memv").textContent = fmtMem(Number(mem.value)));
   }
 
@@ -877,9 +906,6 @@ async function openCreateWizard() {
   renderStep();
 }
 
-function loaderEmoji(id) {
-  return { vanilla: "🟩", paper: "📄", purpur: "🟣", fabric: "🧵", quilt: "🧶", forge: "🔨", neoforge: "🌘", modrinth: "📦" }[id] || "🎮";
-}
 const KIND_LABEL = { mod: "modloader", pack: "modpack", plugin: "plugin", vanilla: "vanilla" };
 function loaderVersionLabel(id) {
   return { fabric: "Fabric loader version", quilt: "Quilt loader version", forge: "Forge build", neoforge: "NeoForge build" }[id] || "Build";
@@ -906,7 +932,7 @@ async function renderServer(id) {
   view.innerHTML = `
     <div class="page">
       <div class="srv-header">
-        <div class="emoji">${esc(s.icon || "🎮")}</div>
+        <div class="emoji">${srvIcon(s)}</div>
         <div>
           <h1>${esc(s.name)}</h1>
           <div class="row">
@@ -914,7 +940,7 @@ async function renderServer(id) {
             <span class="badge loader">${esc(cap(s.loader))}</span>
             <span class="badge mc">${esc(s.mc || "")}</span>
             ${s.modLoader ? `<span class="badge loader">${esc(cap(s.modLoader))}</span>` : ""}
-            ${s.pack ? `<span class="badge mc" title="Modrinth modpack">📦 ${esc(s.pack.versionNumber || "")}</span>` : s.build ? `<span class="badge">${esc(s.build)}</span>` : ""}
+            ${s.pack ? `<span class="badge mc" title="Modrinth modpack">${ico("box")} ${esc(s.pack.versionNumber || "")}</span>` : s.build ? `<span class="badge">${esc(s.build)}</span>` : ""}
             <span class="badge mono" title="Local connect address">localhost:${s.port}</span>
             <span id="srv-addr">${addrChipHTML(s.playit)}</span>
           </div>
@@ -968,10 +994,10 @@ function renderActions(s) {
   const busy = ["starting", "stopping", "installing"].includes(s.status);
   box.innerHTML = `
     ${running || s.status === "starting"
-      ? `<button class="btn btn-red" data-a="stop">■ Stop</button>
-         <button class="btn" data-a="restart">↻ Restart</button>`
-      : `<button class="btn btn-green" data-a="start" ${busy ? "disabled" : ""}>▶ Start</button>`}
-    ${running || s.status === "starting" ? `<button class="btn btn-ghost btn-icon" data-a="kill" title="Force kill">⚡</button>` : ""}
+      ? `<button class="btn btn-red" data-a="stop">${ico("stop")} Stop</button>
+         <button class="btn" data-a="restart">${ico("rotate")} Restart</button>`
+      : `<button class="btn btn-green" data-a="start" ${busy ? "disabled" : ""}>${ico("play")} Start</button>`}
+    ${running || s.status === "starting" ? `<button class="btn btn-ghost btn-icon" data-a="kill" title="Force kill">${ico("bolt")}</button>` : ""}
   `;
   $$("[data-a]", box).forEach((b) => (b.onclick = () => serverAction(s.id, b.dataset.a)));
 }
@@ -982,10 +1008,10 @@ function renderEula(s) {
   if (s.status === "installing") {
     slot.innerHTML = `<div class="banner warn"><span class="spinner"></span> Installing server files… watch the console below for progress.</div>`;
   } else if (s.status === "install-failed") {
-    slot.innerHTML = `<div class="banner err">⚠ Installation failed. Check the console for details — you can delete this server in Settings and try again.</div>`;
+    slot.innerHTML = `<div class="banner err">${ico("alert")} Installation failed. Check the console for details — you can delete this server in Settings and try again.</div>`;
   } else if (!s.eula) {
     slot.innerHTML = `<div class="banner warn">
-      <span>📜</span>
+      <span>${ico("file")}</span>
       <div>You must accept the <a href="https://aka.ms/MinecraftEULA" target="_blank" style="color:inherit;text-decoration:underline">Minecraft EULA</a> before starting this server.</div>
       <div class="b-actions"><button class="btn btn-sm btn-primary" id="accept-eula">Accept EULA</button></div>
     </div>`;
@@ -1257,7 +1283,7 @@ function fmtCount(n) {
 function projectRowHTML(p, selected, actions = "", badge = "") {
   return `
     <div class="pk-row ${selected ? "sel" : ""}" data-id="${esc(p.id)}" data-slug="${esc(p.slug)}">
-      <span class="pk-icon">${p.icon ? `<img src="${esc(p.icon)}" alt="" loading="lazy" />` : "<span>📦</span>"}</span>
+      <span class="pk-icon">${p.icon ? `<img src="${esc(p.icon)}" alt="" loading="lazy" />` : `<span>${ico("box")}</span>`}</span>
       <div class="pk-meta">
         <div class="pk-title">${esc(p.title)} <span class="pk-author">by ${esc(p.author)}</span> ${badge}</div>
         <div class="pk-desc">${esc(p.description)}</div>
@@ -1360,10 +1386,10 @@ function renderFilters(id) {
     `<span class="fl-label">Showing</span>` +
     defs.map((d) => `
       <button class="fchip ${f[d.key] ? "on" : "off"}" data-f="${d.key}" title="${esc(d.tip)} — click to ${f[d.key] ? "unlock" : "lock"}">
-        <span class="fl-ic">${f[d.key] ? "🔒" : "🔓"}</span> ${esc(f[d.key] ? d.on : d.off)}
+        <span class="fl-ic">${f[d.key] ? ico("lock") : ico("unlock")}</span> ${esc(f[d.key] ? d.on : d.off)}
       </button>`).join("") +
     (open
-      ? `<span class="fl-warn">⚠ ${open} filter${open === 1 ? "" : "s"} unlocked — results may not run here.</span>`
+      ? `<span class="fl-warn">${ico("alert")} ${open} filter${open === 1 ? "" : "s"} unlocked — results may not run here.</span>`
       : "");
 
   $$(".fchip", box).forEach((b) => (b.onclick = () => {
@@ -1405,7 +1431,7 @@ async function loadInstalled(id) {
 
   const packRow = data.pack
     ? `<div class="file-row md-item" data-slug="${esc(data.pack.projectId || "")}">
-         <span class="fic">📦</span>
+         <span class="fic">${ico("box")}</span>
          <span class="fname"><b>${esc(data.pack.name)}</b> ${esc(data.pack.versionNumber || "")}
            <span class="muted">modpack · ${data.pack.files} files installed with the server</span></span>
        </div>`
@@ -1413,20 +1439,20 @@ async function loadInstalled(id) {
 
   const rows = data.items.map((it) => `
     <div class="file-row md-item" data-slug="${esc(it.slug || "")}">
-      <span class="fic">${it.icon ? `<img class="md-ic" src="${esc(it.icon)}" alt="" loading="lazy" />` : "🧩"}</span>
+      <span class="fic">${it.icon ? `<img class="md-ic" src="${esc(it.icon)}" alt="" loading="lazy" />` : ico("layers")}</span>
       <span class="fname">
         <a href="https://modrinth.com/project/${esc(it.slug)}" target="_blank" rel="noopener">${esc(it.title)}</a>
         <span class="muted">${esc(it.versionNumber || it.file.split("/").pop())}${it.fromPack ? " · from the modpack" : it.dependency ? " · dependency" : ""} · ${fmtBytes(it.size)}</span>
       </span>
       <span class="md-upd-slot" data-project="${esc(it.projectId)}"></span>
-      <span class="fdel" data-del="${esc(it.file)}" title="Remove">🗑</span>
+      <span class="fdel" data-del="${esc(it.file)}" title="Remove">${ico("trash")}</span>
     </div>`).join("");
 
   const loose = data.unmanaged.map((u) => `
     <div class="file-row">
-      <span class="fic">📄</span>
+      <span class="fic">${ico("file")}</span>
       <span class="fname">${esc(u.name)} <span class="muted">added by hand · ${fmtBytes(u.size)}</span></span>
-      <span class="fdel" data-del="${esc(u.file)}" title="Remove">🗑</span>
+      <span class="fdel" data-del="${esc(u.file)}" title="Remove">${ico("trash")}</span>
     </div>`).join("");
 
   box.innerHTML = packRow || rows || loose
@@ -1478,7 +1504,7 @@ async function browse(id, offset) {
             <button class="btn btn-sm ${have.has(h.id) ? "" : "btn-primary"}" data-install="${esc(h.id)}">${have.has(h.id) ? "Reinstall" : "Install"}</button>
             <button class="btn btn-sm btn-ghost btn-icon" data-versions="${esc(h.id)}" title="Pick a specific version">⋯</button>
           </div>`,
-          bad ? `<span class="pk-warn" title="This won't load on ${esc(cap(content.loader))} ${esc(s.mc)}">⚠ ${esc(bad)}</span>` : ""
+          bad ? `<span class="pk-warn" title="This won't load on ${esc(cap(content.loader))} ${esc(s.mc)}">${ico("alert")} ${esc(bad)}</span>` : ""
         );
       })
       .join("");
@@ -1596,7 +1622,7 @@ async function openVersionPicker(id, projectId) {
     <div class="modal-head"><h2>Choose a version</h2><button class="modal-close">×</button></div>
     <div class="modal-body">
       <div class="vp-top">
-        <span class="pk-icon">${p && p.icon ? `<img src="${esc(p.icon)}" alt="" />` : "<span>🧩</span>"}</span>
+        <span class="pk-icon">${p && p.icon ? `<img src="${esc(p.icon)}" alt="" />` : `<span>${ico("layers")}</span>`}</span>
         <div class="vp-who">
           <b>${esc(p ? p.title : "This project")}</b>
           <span>Installs into <span class="mono">${esc(content.folder === "datapacks" ? "world/datapacks" : content.folder)}/</span> · ${esc(cap(content.loader))} · Minecraft ${esc(s.mc)}</span>
@@ -1608,7 +1634,7 @@ async function openVersionPicker(id, projectId) {
       <div id="vp-list"><div class="pk-empty"><span class="spinner"></span> Loading versions…</div></div>
     </div>
     <div class="modal-foot">
-      ${p ? `<a class="muted" href="https://modrinth.com/project/${esc(p.slug)}" target="_blank" rel="noopener" style="font-size:12px;text-decoration:underline">Changelogs on Modrinth ↗</a>` : "<span></span>"}
+      ${p ? `<a class="muted" href="https://modrinth.com/project/${esc(p.slug)}" target="_blank" rel="noopener" style="font-size:12px">Changelogs on Modrinth ${ico("external")}</a>` : "<span></span>"}
       <button class="btn btn-ghost" data-x>Close</button>
     </div>`, { wide: true });
   $(".modal-close").onclick = $("[data-x]").onclick = closeModal;
@@ -1664,7 +1690,7 @@ async function openVersionPicker(id, projectId) {
             <div class="vp-num">${esc(v.number)}
               ${v.id === latestId ? `<span class="vp-tag latest">Latest that fits</span>` : ""}
               ${isInstalled ? `<span class="vp-tag cur">Installed</span>` : ""}
-              ${bad ? `<span class="vp-tag bad" title="This build won't load on ${esc(cap(content.loader))} ${esc(s.mc)}">⚠ doesn't fit</span>` : ""}
+              ${bad ? `<span class="vp-tag bad" title="This build won't load on ${esc(cap(content.loader))} ${esc(s.mc)}">${ico("alert")} doesn't fit</span>` : ""}
             </div>
             <div class="vp-sub" title="${esc(v.gameVersions.join(", "))}">
               ${esc(v.loaders.map(cap).join(", ") || "any loader")} · ${esc(mcRange(v.gameVersions))} · ${esc(fmtDate(v.published))} · ${fmtCount(v.downloads)} downloads
@@ -1711,8 +1737,8 @@ async function renderFilesTab(id, dir = "") {
     <div class="fm-bar">
       <div class="breadcrumb" id="fm-crumb"></div>
       <div style="margin-left:auto;display:flex;gap:8px">
-        <button class="btn btn-sm" id="fm-mkdir"><span class="ic">📁</span> New folder</button>
-        <label class="btn btn-sm btn-primary" style="cursor:pointer"><span class="ic">⬆</span> Upload
+        <button class="btn btn-sm" id="fm-mkdir">${ico("folder")} New folder</button>
+        <label class="btn btn-sm btn-primary" style="cursor:pointer">${ico("upload")} Upload
           <input type="file" id="fm-upload" multiple style="display:none" />
         </label>
       </div>
@@ -1751,10 +1777,10 @@ async function loadDir(id, dir) {
 
     table.innerHTML = data.entries.length ? data.entries.map((e) => `
       <div class="file-row">
-        <span class="fic">${e.dir ? "📁" : fileIcon(e.name)}</span>
+        <span class="fic">${e.dir ? ico("folder") : fileIcon(e.name)}</span>
         <span class="fname ${e.dir ? "dir" : ""}" data-name="${esc(e.name)}" data-dir="${e.dir}">${esc(e.name)}</span>
         <span class="fsize">${e.dir ? "" : fmtBytes(e.size)}</span>
-        <span class="fdel" data-name="${esc(e.name)}" title="Delete">🗑</span>
+        <span class="fdel" data-name="${esc(e.name)}" title="Delete">${ico("trash")}</span>
       </div>`).join("") : `<div class="file-row"><span class="muted" style="padding:4px">Empty folder.</span></div>`;
 
     $$("#fm-table .fname").forEach((el) => (el.onclick = () => {
@@ -1772,11 +1798,10 @@ async function loadDir(id, dir) {
 }
 
 function fileIcon(name) {
-  if (/\.jar$/i.test(name)) return "📦";
-  if (/\.(properties|toml|json|json5|cfg|conf|yml|yaml|txt|log|md)$/i.test(name)) return "📄";
-  if (/\.(png|jpg|jpeg|gif)$/i.test(name)) return "🖼";
-  if (/\.(zip|gz)$/i.test(name)) return "🗜";
-  return "📄";
+  if (/\.jar$/i.test(name)) return ico("box");
+  if (/\.(png|jpg|jpeg|gif)$/i.test(name)) return ico("image");
+  if (/\.(zip|gz)$/i.test(name)) return ico("archive");
+  return ico("file");
 }
 
 const EDITABLE = /\.(properties|toml|json|json5|cfg|conf|yml|yaml|txt|log|md|sh|bat|mcmeta)$/i;
@@ -1807,7 +1832,7 @@ async function openFileEditor(id, path, name) {
 const BOOL = "bool", INT = "int", TXT = "text", SEL = "sel", SECRET = "secret";
 
 const PROP_GROUPS = [
-  { title: "Gameplay", icon: "🎮", open: true, items: [
+  { title: "Gameplay", icon: "sliders", open: true, items: [
     { k: "gamemode", n: "Default game mode", t: SEL, d: "survival", desc: "Mode new players join in.",
       opts: [["survival", "Survival"], ["creative", "Creative"], ["adventure", "Adventure"], ["spectator", "Spectator"]] },
     { k: "force-gamemode", n: "Force game mode", t: BOOL, d: "false", desc: "Put returning players back into the default mode on every join." },
@@ -1825,7 +1850,7 @@ const PROP_GROUPS = [
       opts: [["1", "1"], ["2", "2"], ["3", "3"], ["4", "4"]] },
   ] },
 
-  { title: "Players & access", icon: "👥", open: true, items: [
+  { title: "Players & access", icon: "users", open: true, items: [
     { k: "motd", n: "Message of the day", t: TXT, d: "A Minecraft Server", wide: true, motd: true,
       desc: "The line shown under the server name in the client's server list. §-codes colour it." },
     { k: "max-players", n: "Max players", t: INT, d: "20", min: 1, max: 2000, desc: "Also editable in Settings, which keeps the panel's player counter in sync." },
@@ -1836,7 +1861,7 @@ const PROP_GROUPS = [
     { k: "hide-online-players", n: "Hide player list", t: BOOL, d: "false", desc: "Don't reveal who is online in the server list ping." },
   ] },
 
-  { title: "World", icon: "🌍", open: true, items: [
+  { title: "World", icon: "map", open: true, items: [
     { k: "level-name", n: "World folder", t: TXT, d: "world", desc: "Folder the world lives in. A new name generates a fresh world." },
     { k: "level-seed", n: "Seed", t: TXT, d: "", ph: "random", desc: "Only used the first time the world generates." },
     { k: "level-type", n: "World type", t: SEL, d: "minecraft:normal", desc: "Terrain generator for a newly created world.",
@@ -1853,7 +1878,7 @@ const PROP_GROUPS = [
     { k: "initial-disabled-packs", n: "Disabled datapacks", t: TXT, d: "", desc: "Packs switched off when the world is first created." },
   ] },
 
-  { title: "Performance", icon: "⚡", open: false, items: [
+  { title: "Performance", icon: "gauge", open: false, items: [
     { k: "view-distance", n: "View distance", t: INT, d: "10", min: 2, max: 32, unit: "chunks", desc: "How far players can see. The single biggest lever on CPU and bandwidth." },
     { k: "simulation-distance", n: "Simulation distance", t: INT, d: "10", min: 2, max: 32, unit: "chunks", desc: "How far entities, redstone and crops keep ticking." },
     { k: "entity-broadcast-range-percentage", n: "Entity range", t: INT, d: "100", min: 10, max: 1000, unit: "%", desc: "Distance at which entities are sent to clients. Lower is lighter." },
@@ -1867,7 +1892,7 @@ const PROP_GROUPS = [
     { k: "use-native-transport", n: "Native transport", t: BOOL, d: "true", desc: "Linux-only optimised networking. Ignored elsewhere." },
   ] },
 
-  { title: "Resource pack", icon: "📦", open: false, items: [
+  { title: "Resource pack", icon: "box", open: false, items: [
     { k: "resource-pack", n: "Pack URL", t: TXT, d: "", ph: "https://…", desc: "Direct download link to a .zip resource pack." },
     { k: "resource-pack-sha1", n: "Pack SHA-1", t: TXT, d: "", desc: "Checksum of the zip. Without it clients re-download every join." },
     { k: "require-resource-pack", n: "Require the pack", t: BOOL, d: "false", desc: "Kick players who decline it." },
@@ -1875,7 +1900,7 @@ const PROP_GROUPS = [
     { k: "resource-pack-id", n: "Pack UUID", t: TXT, d: "", desc: "Optional UUID identifying the pack." },
   ] },
 
-  { title: "Network & remote access", icon: "🌐", open: false, items: [
+  { title: "Network & remote access", icon: "globe", open: false, items: [
     { k: "server-port", n: "Game port", t: INT, d: "25565", min: 1, max: 65535, desc: "Port Minecraft listens on. Settings changes this too, and keeps the panel in sync." },
     { k: "server-ip", n: "Bind address", t: TXT, d: "", ph: "all interfaces", desc: "Leave blank unless the machine has several addresses." },
     { k: "enable-status", n: "Answer server pings", t: BOOL, d: "true", desc: "Off hides the server from the client's list — it still accepts joins." },
@@ -1892,7 +1917,7 @@ const PROP_GROUPS = [
     { k: "broadcast-rcon-to-ops", n: "Echo RCON to ops", t: BOOL, d: "true", desc: "Show RCON commands to online operators." },
   ] },
 
-  { title: "Advanced", icon: "🧪", open: false, items: [
+  { title: "Advanced", icon: "flask", open: false, items: [
     { k: "enable-jmx-monitoring", n: "JMX monitoring", t: BOOL, d: "false", desc: "Expose tick metrics over JMX." },
     { k: "debug", n: "Debug mode", t: BOOL, d: "false", desc: "Very verbose logging." },
     { k: "bug-report-link", n: "Bug report link", t: TXT, d: "", ph: "https://…", desc: "URL offered to players on a crash." },
@@ -2033,7 +2058,7 @@ function drawProperties(id, text, def) {
     }
     if (it.t === SECRET) {
       return `<input type="password" data-k="${esc(it.k)}" value="${esc(v)}" autocomplete="new-password" />
-        <button class="btn btn-ghost btn-sm prop-eye" data-eye="${esc(it.k)}" title="Show">👁</button>`;
+        <button class="btn btn-ghost btn-sm prop-eye" data-eye="${esc(it.k)}" title="Show">${ico("eye")}</button>`;
     }
     return `<input type="text" data-k="${esc(it.k)}" ${it.mono ? 'class="mono"' : ""} value="${esc(v)}" placeholder="${esc(it.ph || "")}" />`;
   };
@@ -2057,7 +2082,7 @@ function drawProperties(id, text, def) {
 
   const groupHTML = (g, items, note) => `
     <details class="prop-group" ${g.open ? "open" : ""} data-group>
-      <summary><span class="gi">${g.icon}</span><span class="gt">${esc(g.title)}</span>
+      <summary><span class="gi">${ico(g.icon)}</span><span class="gt">${esc(g.title)}</span>
         <span class="gcount">${items.length}</span><span class="caret">▸</span></summary>
       <div class="prop-list">${note || ""}${items.map(rowHTML).join("")}</div>
     </details>`;
@@ -2069,7 +2094,7 @@ function drawProperties(id, text, def) {
     <div class="prop-bar">
       <input type="text" id="prop-search" placeholder="Search settings…" autocomplete="off" />
       <span class="prop-count" id="prop-count"></span>
-      <button class="btn btn-sm" id="prop-raw">📄 Raw file</button>
+      <button class="btn btn-sm" id="prop-raw">${ico("file")} Raw file</button>
       <button class="btn btn-sm btn-ghost" id="prop-undo-all" disabled>Discard</button>
       <button class="btn btn-sm btn-primary" id="prop-save" disabled>Save</button>
     </div>
@@ -2079,7 +2104,7 @@ function drawProperties(id, text, def) {
     <div id="prop-form">
       ${PROP_GROUPS.map((g) => groupHTML(g, g.items)).join("")}
       ${extraItems.length
-        ? groupHTML({ title: "Other keys in this file", icon: "🗂", open: false }, extraItems,
+        ? groupHTML({ title: "Other keys in this file", icon: "folder", open: false }, extraItems,
             `<div class="prop-note">Keys this panel doesn't know — usually written by a mod or an older Minecraft version. Edited as plain text.</div>`)
         : ""}
     </div>
@@ -2174,7 +2199,7 @@ function drawProperties(id, text, def) {
       rawArea.value = pending();
       form.style.display = "none";
       rawBox.style.display = "";
-      $("#prop-raw").textContent = "🎛 Form";
+      $("#prop-raw").textContent = "Form";
       search.disabled = true;
       saveBtn.disabled = false;
       saveBtn.textContent = "Save file";
@@ -2215,7 +2240,8 @@ async function renderSettingsTab(id) {
   body.innerHTML = `
     <div style="max-width:620px">
       <div class="form-row"><label>Server name</label><input type="text" id="st-name" value="${esc(def.name)}" /></div>
-      <div class="form-row"><label>Icon (emoji)</label><input type="text" id="st-icon" value="${esc(def.icon || "")}" maxlength="4" style="width:90px" /></div>
+      <div class="form-row"><label>Icon</label><input type="text" id="st-icon" value="${esc(def.icon || "")}" maxlength="4" style="width:90px" placeholder="—" />
+        <div class="hint">An emoji, if you want one. Left blank the server shows its initial.</div></div>
       <div class="two-col">
         <div class="form-row"><label>Game port</label><input type="number" id="st-port" value="${def.port}" /></div>
         <div class="form-row"><label>Max players</label><input type="number" id="st-max" value="${def.maxPlayers}" /></div>
@@ -2259,7 +2285,7 @@ async function renderSettingsTab(id) {
         <label>Wake on join</label>
         <div class="switch-row">
           <label class="switch"><input type="checkbox" id="st-wake" ${wakeOn ? "checked" : ""} /><i></i></label>
-          <div class="txt"><b>Start the server when someone tries to join</b><span>While it is stopped the panel holds the port, shows "💤 Sleeping" in the server list, and boots it the moment anyone connects.</span></div>
+          <div class="txt"><b>Start the server when someone tries to join</b><span>While it is stopped the panel holds the port, shows it as Sleeping in the server list, and boots it the moment anyone connects.</span></div>
         </div>
         <div class="hint">The player who knocks is asked to reconnect once it is up — nobody can join mid-boot, so a big modpack still means a couple of minutes in the queue. The port is only held while the server is stopped.</div>
       </div>
@@ -2276,7 +2302,7 @@ async function renderSettingsTab(id) {
         <div class="b-actions"><button class="btn btn-red" id="st-delete">Delete server</button></div>
       </div>
     </div>`;
-  const mem = $("#st-mem"); mem.oninput = () => ($("#st-memv").textContent = fmtMem(Number(mem.value)));
+  const mem = $("#st-mem"); paintRange(mem); mem.oninput = () => ($("#st-memv").textContent = fmtMem(Number(mem.value)));
   const pauseSw = $("#st-pause"); pauseSw.onchange = () => ($("#st-pause-secs").disabled = !pauseSw.checked);
   const sleepSw = $("#st-sleep"); sleepSw.onchange = () => ($("#st-sleep-mins").disabled = !sleepSw.checked);
   const wakeSw = $("#st-wake");
@@ -2284,7 +2310,7 @@ async function renderSettingsTab(id) {
   $("#st-save").onclick = async () => {
     try {
       await API.patch(`/api/servers/${id}`, {
-        name: $("#st-name").value.trim(), icon: $("#st-icon").value.trim() || "🎮",
+        name: $("#st-name").value.trim(), icon: $("#st-icon").value.trim(),
         port: Number($("#st-port").value), maxPlayers: Number($("#st-max").value),
         memory: Number(mem.value), jvmArgs: $("#st-jvm").value.trim(), javaPath: $("#st-java").value.trim() || null,
         pauseWhenEmpty: pauseSw.checked ? Number($("#st-pause-secs").value) || 60 : 0,
@@ -2390,20 +2416,20 @@ function pickTunnel(id) {
     if (!free.length) return resolve("new");
 
     modal(`
-      <div class="modal-head"><h2>🌍 Public address</h2><button class="modal-close">×</button></div>
+      <div class="modal-head"><h2>Public address</h2><button class="modal-close">×</button></div>
       <div class="modal-body">
         <p class="hint" style="margin-top:0">Point one of your existing playit.gg tunnels at this server — it keeps its address, and MC Hoster takes over forwarding it — or make a new one.</p>
         <div class="file-table">
           ${free.map((t) => `
             <div class="file-row pick" data-t="${esc(t.id)}" style="cursor:pointer">
-              <span class="fic">${t.recommended ? "🟩" : "🔌"}</span>
+              <span class="fic">${t.recommended ? ico("check") : ico("plug")}</span>
               <span class="fname">${esc(t.name)}
                 <span class="muted" style="font-size:11.5px">${esc(t.address || (t.status === "pending" ? "address pending" : "no address"))}${t.agent ? " · on " + esc(t.agent) : ""}</span>
               </span>
               <span class="fsize">${esc(t.type || t.portType)}</span>
             </div>`).join("")}
           <div class="file-row pick" data-t="new" style="cursor:pointer">
-            <span class="fic">＋</span><span class="fname">Create a new Minecraft tunnel<span class="muted" style="font-size:11.5px">Fresh address, set up automatically</span></span>
+            <span class="fic">${ico("plus")}</span><span class="fname">Create a new Minecraft tunnel<span class="muted" style="font-size:11.5px">Fresh address, set up automatically</span></span>
             <span class="fsize">minecraft-java</span>
           </div>
         </div>
@@ -2426,18 +2452,18 @@ async function openSettings() {
   const { javas } = await API.get("/api/java");
   state.javas = javas;
   modal(`
-    <div class="modal-head"><h2>⚙ Settings</h2><button class="modal-close">×</button></div>
+    <div class="modal-head"><h2>Settings</h2><button class="modal-close">×</button></div>
     <div class="modal-body">
       <div class="section-title" style="margin-top:0">Java runtimes</div>
       ${javas.length ? `<div class="file-table">${javas.map((j) => `
-        <div class="file-row"><span class="fic">☕</span><span class="fname mono">${esc(j.path)}</span><span class="fsize">Java ${esc(String(j.major))}${j.managed ? " · managed" : ""} · v${esc(j.version)}</span></div>`).join("")}</div>`
+        <div class="file-row"><span class="fic">${ico("coffee")}</span><span class="fname mono">${esc(j.path)}</span><span class="fsize">Java ${esc(String(j.major))}${j.managed ? " · managed" : ""} · v${esc(j.version)}</span></div>`).join("")}</div>`
         : `<div class="banner err" style="margin:0">No Java runtime found. Pick a version below and MC Hoster will fetch an Eclipse Temurin JRE into its own <span class="mono">data/runtimes</span> folder — nothing is installed system-wide.</div>`}
       <p class="hint" style="margin-top:8px">Minecraft pins a Java version per release: 1.16 and older need 8, 1.18–1.20.4 need 17, 1.20.5–1.21.x need 21, and 26.x needs 25. MC Hoster matches the right one per server and downloads it if it's missing.</p>
       <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        <button class="btn btn-sm" id="set-rescan">↻ Rescan for Java</button>
+        <button class="btn btn-sm" id="set-rescan">${ico("rotate")} Rescan for Java</button>
         <span class="muted" style="font-size:12px">Add runtime:</span>
         <select id="set-jmajor" style="width:auto;min-width:110px">${[25, 21, 17, 8].map((m) => `<option value="${m}">Java ${m}${JAVA_NOTE[m] ? " · " + JAVA_NOTE[m] : ""}</option>`).join("")}</select>
-        <button class="btn btn-sm" id="set-jget">⬇ Download</button>
+        <button class="btn btn-sm" id="set-jget">${ico("download")} Download</button>
       </div>
 
       <div class="form-row" style="margin-top:22px">
@@ -2463,7 +2489,7 @@ async function openSettings() {
     const btn = $("#set-jget");
     const major = Number($("#set-jmajor").value);
     btn.disabled = true;
-    btn.textContent = "⬇ Downloading Java " + major + "…";
+    btn.textContent = "Downloading Java " + major + "…";
     try {
       const out = await API.post("/api/java/install", { major });
       state.javas = out.javas;
@@ -2473,7 +2499,7 @@ async function openSettings() {
       openSettings();
     } catch (e) {
       btn.disabled = false;
-      btn.textContent = "⬇ Download";
+      btn.innerHTML = ico("download") + " Download";
       toast(e.message, "err");
     }
   };
@@ -2503,8 +2529,8 @@ const PLAYIT_ACCOUNT_NOTE = {
 // The address chip shown on cards and headers. Clicking copies it.
 function addrChipHTML(pl) {
   if (!pl || !pl.enabled) return "";
-  if (!pl.address) return `<span class="addr pending" title="playit is allocating an address">🌍 allocating…</span>`;
-  return `<span class="addr" data-copy="${esc(pl.address)}" title="Public address — click to copy">🌍 ${esc(pl.address)} <span class="copy">⧉</span></span>`;
+  if (!pl.address) return `<span class="addr pending" title="playit is allocating an address">${ico("globe")} allocating…</span>`;
+  return `<span class="addr" data-copy="${esc(pl.address)}" title="Public address — click to copy">${ico("globe")} ${esc(pl.address)} <span class="copy">${ico("copy")}</span></span>`;
 }
 function bindAddrChips(root = document) {
   $$("[data-copy]", root).forEach((el) => (el.onclick = (ev) => { ev.stopPropagation(); copyText(el.dataset.copy); }));
@@ -2532,7 +2558,7 @@ function renderPlayitSection() {
     const status = {
       waiting: "Waiting for you to open the link…",
       visited: "Approve MC Hoster in your browser to finish linking.",
-      accepted: "✔ Approved — finishing up…",
+      accepted: "Approved — finishing up…",
       rejected: "The request was rejected in the browser.",
       expired: "That claim link expired.",
       error: pl.claim.error || "Something went wrong.",
@@ -2557,18 +2583,18 @@ function renderPlayitSection() {
   if (!pl.linked) {
     box.innerHTML = `
       <p class="hint" style="margin-top:0">Give your servers a public address that friends can join — no port forwarding, no router settings, works behind CGNAT. MC Hoster downloads the official playit agent (${esc(pl.version)}, ~5 MB) into its own <span class="mono">data/playit</span> folder and links it to your free playit.gg account. Nothing is installed system-wide.</p>
-      <button class="btn btn-primary" id="pl-link">🌍 Connect playit.gg</button>`;
+      <button class="btn btn-primary" id="pl-link">${ico("globe")} Connect playit.gg</button>`;
     $("#pl-link").onclick = async () => {
       const btn = $("#pl-link");
       btn.disabled = true;
-      btn.textContent = pl.installed ? "Starting…" : "⬇ Downloading agent…";
+      btn.textContent = pl.installed ? "Starting…" : "Downloading agent…";
       try {
         await playitCall("/api/playit/link");
         renderPlayitSection();
       } catch (e) {
         toast(e.message, "err");
         btn.disabled = false;
-        btn.textContent = "🌍 Connect playit.gg";
+        btn.innerHTML = ico("globe") + " Connect playit.gg";
       }
     };
     return;
@@ -2588,13 +2614,13 @@ function renderPlayitSection() {
     ${accountNote ? `<div class="banner warn" style="margin:0 0 12px">${esc(accountNote)} <a href="https://playit.gg/account" target="_blank" rel="noopener" style="text-decoration:underline">Open playit.gg</a></div>` : ""}
     <p class="hint" style="margin-top:0">Turn a public address on per server, in that server's <b>Settings</b> tab. Tunnels stay up while the panel runs.</p>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <button class="btn btn-sm" id="pl-refresh">↻ Refresh tunnels</button>
+      <button class="btn btn-sm" id="pl-refresh">${ico("rotate")} Refresh tunnels</button>
       <a class="btn btn-sm" href="https://playit.gg/account/tunnels" target="_blank" rel="noopener">Manage at playit.gg</a>
       <button class="btn btn-sm btn-red" id="pl-unlink">Unlink account</button>
     </div>`;
   $("#pl-refresh").onclick = async () => {
     const btn = $("#pl-refresh");
-    btn.disabled = true; btn.textContent = "↻ Refreshing…";
+    btn.disabled = true; btn.textContent = "Refreshing…";
     try { await playitCall("/api/playit/refresh"); } catch (e) { toast(e.message, "err"); }
     renderPlayitSection();
   };
