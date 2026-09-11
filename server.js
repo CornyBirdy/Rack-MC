@@ -19,6 +19,7 @@ const playit = require("./lib/playit");
 const sysmon = require("./lib/sysmon");
 const changelog = require("./lib/changelog");
 const modrinth = require("./lib/modrinth");
+const playerlog = require("./lib/playerlog");
 
 // Port precedence: explicit flag, then the launcher's MC_PORT (our portEnv),
 // then whatever Rack/the old controller assigned, then the standalone default.
@@ -46,6 +47,14 @@ function sendJSON(res, code, obj) {
   const body = JSON.stringify(obj);
   res.writeHead(code, { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) });
   res.end(body);
+}
+
+// Plain-text/CSV answer, optionally offered to the browser as a download.
+function sendText(res, code, text, { type = "text/plain; charset=utf-8", filename = null } = {}) {
+  const headers = { "Content-Type": type, "Content-Length": Buffer.byteLength(text) };
+  if (filename) headers["Content-Disposition"] = `attachment; filename="${filename}"`;
+  res.writeHead(code, headers);
+  res.end(text);
 }
 
 function readJSONBody(req) {
@@ -421,6 +430,45 @@ const server = http.createServer(async (req, res) => {
       if (action === "logs" && req.method === "GET")
         return sendJSON(res, 200, { log: manager.slot(id).log });
 
+      // ---- player log ----
+      // Who has been on this server, when, for how long, and what was said.
+      // The roster's "online" column comes from the live player list rather
+      // than the log's own idea of it, so the two can never disagree.
+      const live = () => manager.slot(id).players;
+
+      if (action === "players" && !parts[4] && req.method === "GET")
+        return sendJSON(res, 200, playerlog.roster(id, live()));
+
+      // GET /api/servers/:id/players/:name — one player's sessions + totals
+      if (action === "players" && parts[4] && !["log", "export"].includes(parts[4]) && req.method === "GET") {
+        const detail = playerlog.playerDetail(id, decodeURIComponent(parts[4]), live());
+        if (!detail) return sendJSON(res, 404, { error: "That player has never been on this server." });
+        return sendJSON(res, 200, { player: detail });
+      }
+
+      // GET /api/servers/:id/players/log?type=chat,join&player=&q=&before=&limit=
+      if (action === "players" && parts[4] === "log" && req.method === "GET")
+        return sendJSON(
+          res,
+          200,
+          playerlog.query(id, {
+            types: (q.get("type") || "").split(",").filter(Boolean),
+            player: q.get("player") || null,
+            q: q.get("q") || null,
+            before: q.get("before") ? Number(q.get("before")) : null,
+            limit: Number(q.get("limit")) || 200,
+          })
+        );
+
+      if (action === "players" && parts[4] === "log" && req.method === "DELETE")
+        return sendJSON(res, 200, playerlog.clear(id));
+
+      if (action === "players" && parts[4] === "export" && req.method === "GET")
+        return sendText(res, 200, playerlog.csv(id), {
+          type: "text/csv; charset=utf-8",
+          filename: `${(def.name || "server").replace(/[^A-Za-z0-9_-]+/g, "-")}-players.csv`,
+        });
+
       // properties
       if (action === "properties" && req.method === "GET")
         return sendJSON(res, 200, { text: manager.readProperties(id) });
@@ -560,6 +608,7 @@ function isWin() {
 /* --------------------------------------------------------- graceful shutdown */
 function shutdown() {
   playit.stopAgent();
+  playerlog.flushAll(); // history batched in memory would otherwise go with us
   manager.closeWakeListeners().catch(() => {});
   for (const s of store.all()) {
     const rtSlot = manager.slot(s.id);

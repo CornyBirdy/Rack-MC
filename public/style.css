@@ -768,6 +768,119 @@ select { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmln
   border-bottom: 1px solid var(--line); border-top: 1px solid var(--line);
 }
 
+/* ----------------------------------------------------------- player log */
+/* Two panes: who has been on (left), and what happened (right). The feed is a
+ * log, so it keeps the console's monospace time column and hairline rows
+ * rather than pretending to be a card list. */
+
+.plog-sum { display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
+.plog-tile {
+  flex: 1; min-width: 130px; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 11px 13px; display: flex; flex-direction: column; gap: 3px;
+}
+.plog-tile .label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--muted-2); }
+.plog-tile .value { font-size: 17px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.plog-tile .sub { font-size: 11px; color: var(--muted); }
+
+.plog { display: grid; grid-template-columns: 330px 1fr; gap: 16px; align-items: start; }
+@media (max-width: 1080px) { .plog { grid-template-columns: 1fr; } }
+.plog-pane { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+.plog-pane-head {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 10px 12px; border-bottom: 1px solid var(--line); background: var(--bg-2);
+}
+.plog-pane-head h4 {
+  margin: 0; font-size: 12px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--muted);
+  display: flex; align-items: center; gap: 7px;
+}
+.plog-pane-head h4 .i { width: 13px; height: 13px; }
+.plog-pane-head .fm-find { margin-left: auto; min-width: 0; }
+.plog-pane-head .fm-find input[type="text"] { width: 160px; }
+.plog-tools { margin-left: auto; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+/* ---- roster ---- */
+.plog-row { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-bottom: 1px solid var(--line); cursor: pointer; }
+.plog-row:last-child { border-bottom: none; }
+.plog-row:hover { background: var(--panel-2); }
+.plog-row.sel { background: var(--accent-soft); box-shadow: inset 2px 0 0 var(--accent); }
+.plog-row .head {
+  width: 26px; height: 26px; border-radius: var(--radius-xs); background: var(--panel-3); border: 1px solid var(--line-2);
+  color: var(--muted); font-family: var(--mono); font-size: 12px; display: grid; place-items: center; flex: none;
+}
+.plog-row.online .head { color: var(--green-2); border-color: var(--accent-line); background: var(--accent-soft); }
+.plog-row .who { flex: 1; min-width: 0; }
+.plog-row .nm { font-size: 13.5px; display: flex; align-items: center; gap: 7px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.plog-row .sub { font-size: 11px; color: var(--muted-2); margin-top: 2px; }
+.plog-row .time { text-align: right; line-height: 1.25; flex: none; }
+.plog-row .time b { font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.plog-row .time span { display: block; font-size: 10px; color: var(--muted-2); text-transform: uppercase; letter-spacing: 0.6px; }
+
+/* ---- feed ---- */
+.plog-chips { display: flex; gap: 6px; flex-wrap: wrap; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.plog-chip {
+  background: var(--panel-2); border: 1px solid var(--line); color: var(--muted); cursor: pointer;
+  border-radius: var(--radius-xs); padding: 4px 10px; font: inherit; font-size: 11.5px;
+}
+.plog-chip:hover { color: var(--text); border-color: var(--line-2); }
+.plog-chip.on { color: var(--accent-2); border-color: var(--accent-line); background: var(--accent-soft); }
+.plog-only {
+  display: flex; align-items: center; gap: 8px; padding: 8px 12px; font-size: 12px; color: var(--muted);
+  border-bottom: 1px solid var(--line); background: var(--accent-soft);
+}
+.plog-only b { color: var(--text); }
+/* The shared clear button is positioned for a search field; here it just sits
+ * at the end of the row. */
+.plog-only .fm-x { position: static; margin-left: auto; }
+.plog-feed { max-height: 62vh; overflow-y: auto; }
+.plog-day {
+  position: sticky; top: 0; z-index: 1; background: var(--bg-2); border-bottom: 1px solid var(--line);
+  padding: 5px 12px; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.9px; color: var(--muted-2);
+}
+.plog-ev { display: flex; gap: 10px; padding: 7px 12px; font-size: 13px; line-height: 1.45; border-bottom: 1px solid var(--line); }
+.plog-ev:last-child { border-bottom: none; }
+.plog-ev:hover { background: var(--panel-2); }
+.pe-time { font-family: var(--mono); font-size: 11.5px; color: var(--muted-2); flex: none; padding-top: 1px; }
+.pe-kind { flex: none; color: var(--muted-2); display: grid; place-items: center; width: 16px; padding-top: 1px; }
+.pe-kind .i { width: 13px; height: 13px; }
+.pe-body { min-width: 0; word-break: break-word; }
+.pe-who {
+  background: none; border: none; padding: 0; font: inherit; font-weight: 600; color: var(--text);
+  cursor: pointer; border-bottom: 1px dotted transparent;
+}
+.pe-who:hover { color: var(--accent-2); border-bottom-color: var(--accent-line); }
+.pe-dim { color: var(--muted-2); }
+.pe-adv { color: var(--amber); }
+.plog-ev.join .pe-kind { color: var(--green); }
+.plog-ev.leave .pe-kind { color: var(--muted-2); }
+.plog-ev.chat .pe-kind { color: var(--cyan); }
+.plog-ev.death .pe-kind, .plog-ev.death .pe-body { color: #e39aa3; }
+.plog-ev.advancement .pe-kind { color: var(--amber); }
+.plog-ev.command .pe-kind { color: var(--blue); }
+.plog-ev.server .pe-kind { color: var(--muted-2); }
+.plog-foot { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-top: 1px solid var(--line); font-size: 11.5px; }
+.plog-foot:empty { display: none; }
+
+/* ---- player card ---- */
+.pc-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.pc-stat {
+  background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 10px 12px;
+  display: flex; flex-direction: column; gap: 3px;
+}
+.pc-stat span { font-size: 10px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--muted-2); }
+.pc-stat b { font-size: 16px; font-variant-numeric: tabular-nums; }
+.pc-facts { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px 16px; margin-top: 14px; font-size: 12.5px; }
+.pc-facts > div { display: flex; justify-content: space-between; gap: 10px; border-bottom: 1px solid var(--line); padding-bottom: 6px; }
+.pc-facts span { color: var(--muted); }
+.pc-facts b.small { font-size: 11px; }
+.pc-sessions { border: 1px solid var(--line); border-radius: var(--radius-sm); overflow: hidden; }
+.pc-srow {
+  display: grid; grid-template-columns: 1.3fr 1.3fr 0.7fr 1fr; gap: 10px;
+  padding: 8px 12px; font-size: 12.5px; border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums;
+}
+.pc-srow:last-child { border-bottom: none; }
+.pc-srow.head { background: var(--bg-2); color: var(--muted-2); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.7px; }
+.pc-srow.live { color: var(--green-2); }
+
 /* -------------------------------------------------------------------- icons */
 /* Everything comes from icons.js as a 16x16 stroked path on currentColor, so
  * an icon is always exactly as loud as the text next to it. */

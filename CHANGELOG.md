@@ -6,6 +6,44 @@ the day the work landed.
 
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-09-11
+
+### Added
+
+- **A player log, on a Players tab of its own.** Minecraft narrates every join,
+  leave, chat line and death to its console, but that console is a 400-line
+  ring buffer that dies with the process — so the panel now keeps its own
+  durable copy per server and puts it behind a tab. The **roster** is everyone
+  who has ever joined, newest activity first, with total time played, how many
+  sessions that took and when they were last seen; anyone online right now has
+  their current session ticking up in place. The **activity feed** beside it is
+  what happened: joins and leaves carrying the length of the session and why it
+  ended, chat, deaths, advancements, the commands players ran, and the server's
+  own starts, stops and sleeps for context. Filter it by kind, search it, or
+  click any name — in the feed or the roster — to narrow it to that person.
+- **A card per player.** Clicking someone in the roster opens their history
+  with this server: the totals, then the sessions behind them — joined at, left
+  at, how long, and what ended it — plus the last address they connected from
+  and their UUID, both learned from the login lines the server prints.
+- **Export and clear.** The whole log downloads as CSV for anyone who wants it
+  in a spreadsheet, and a single button clears a server's history (the world is
+  untouched) and starts tracking again from that moment.
+
+### Notes
+
+- Everything is parsed from what the server prints, so vanilla, Paper, Purpur
+  and modded servers all work with nothing installed. Each pattern anchors on
+  the console's own line prefix, which is what stops a player typing "joined
+  the game" in chat from writing itself into the log as a join.
+- Deaths are the one fuzzy case: they are matched against the stems of the
+  vanilla English death messages *and* only when the line starts with somebody
+  who is actually online, so a translated server may log fewer of them rather
+  than log the wrong thing.
+- History lives in `data/playerlog/<id>/`, written in batches rather than per
+  line, and the last 20,000 events per server are kept. Sessions left open by a
+  crash — of the server or of the panel — are closed at the last thing the log
+  actually saw, so playtime totals never run on while nothing is running.
+
 ## 2026-08-29
 
 ### Added

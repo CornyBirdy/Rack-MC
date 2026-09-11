@@ -38,6 +38,7 @@ const state = {
   route: { name: "dashboard", id: null },
   consoleES: null, // EventSource for the open server console
   content: null, // last /content payload for the open server (installed mods)
+  plog: null, // players tab: filters + the page of history it is showing
   activeTab: "console",
 };
 
@@ -58,6 +59,29 @@ function fmtUptime(ms) {
   return h ? `${h}h ${m}m` : m ? `${m}m ${sec}s` : `${sec}s`;
 }
 function fmtMem(mb) { return mb >= 1024 ? (mb / 1024).toFixed(1) + " GB" : mb + " MB"; }
+// Wall-clock time of day, and the day itself — the player log is read by
+// scrolling, so rows carry the time and the day is a heading between them.
+function fmtClock(t) {
+  return new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+}
+function fmtDay(t) {
+  const d = new Date(t), now = new Date();
+  const midnight = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const days = Math.round((midnight(now) - midnight(d)) / 86400000);
+  if (days === 0) return "Today";
+  if (days === 1) return "Yesterday";
+  return d.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short", year: d.getFullYear() === now.getFullYear() ? undefined : "numeric" });
+}
+function fmtWhen(t) { return t ? fmtDay(t) + " " + fmtClock(t) : "—"; }
+function fmtAgo(t) {
+  if (!t) return "never";
+  const s = Math.floor((Date.now() - t) / 1000);
+  if (s < 60) return "just now";
+  if (s < 3600) return Math.floor(s / 60) + "m ago";
+  if (s < 86400) return Math.floor(s / 3600) + "h ago";
+  const d = Math.floor(s / 86400);
+  return d < 30 ? d + "d ago" : new Date(t).toLocaleDateString();
+}
 // Per-server avatar: the emoji from Settings if there is one, else an initial.
 function srvIcon(s) { return s && s.icon ? esc(s.icon) : initialTile(s && s.name); }
 // Fills the <span data-ico> placeholders in index.html's static markup.
@@ -290,6 +314,12 @@ async function handleGlobalEvent(e) {
     renderSidebar();
     if ($("#playit-section")) renderPlayitSection();
     if (state.route.name === "server" && $("#st-playit")) renderServerPlayit(state.route.id);
+    return;
+  }
+  // Player-log records arrive for every chat line; only the open Players tab
+  // cares, and a sidebar redraw per message would be silly.
+  if (e.type === "playerlog") {
+    if (state.route.name === "server" && state.route.id === e.id) patchServerLive(e);
     return;
   }
   if (e.type === "servers") {
@@ -963,6 +993,7 @@ async function renderServer(id) {
 
       <div class="tabs" id="tabs">
         <div class="tab" data-tab="console">Console</div>
+        <div class="tab" data-tab="players">Players</div>
         <div class="tab" data-tab="content">${esc(s.content ? s.content.noun : "Mods")}</div>
         <div class="tab" data-tab="files">Files</div>
         <div class="tab" data-tab="properties">Properties</div>
@@ -1030,12 +1061,13 @@ async function serverAction(id, act) {
 }
 
 /* ------------------------------------------------------------- tab switching */
-const TABS = ["console", "content", "files", "properties", "settings"];
+const TABS = ["console", "players", "content", "files", "properties", "settings"];
 function selectTab(id, tab) {
   state.activeTab = tab;
   $$("#tabs .tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === tab));
   closeConsoleStream();
   if (tab === "console") renderConsoleTab(id);
+  else if (tab === "players") renderPlayersTab(id);
   else if (tab === "content") renderContentTab(id);
   else if (tab === "files") renderFilesTab(id);
   else if (tab === "properties") renderPropertiesTab(id);
@@ -1087,7 +1119,14 @@ function renderConsoleTab(id) {
   bindQuickCommands(id);
   $("#con-clear").onclick = () => (out.innerHTML = "");
 
-  openConsoleStream(id, out);
+  openServerStream(id, (e, s) => {
+    if (e.type === "console") appendConsole(out, e.stream, e.line);
+    else if (e.type === "players" || e.type === "pings") { if (s) renderPlayers(s); }
+    else if (e.type === "status") {
+      const inp = $("#con-in"); if (inp) inp.disabled = e.status !== "running";
+      const dot = $(".console-head .dot"); if (dot) dot.className = "dot " + viewStatus(e);
+    }
+  });
 }
 
 /* ------------------------------------------------------- quick commands */
@@ -1195,20 +1234,24 @@ function appendConsole(out, stream, line) {
   if (atBottom) out.scrollTop = out.scrollHeight;
 }
 
-function openConsoleStream(id, out) {
+/*
+ * The per-server channel: console lines plus that server's status, players and
+ * pings. Shared state is patched here for whoever is looking; `onEvent` is the
+ * open tab's own business with the event.
+ */
+function openServerStream(id, onEvent) {
   const es = new EventSource(`/api/servers/${id}/console`);
   state.consoleES = es;
   es.onmessage = (ev) => {
     let e; try { e = JSON.parse(ev.data); } catch { return; }
     if (e.type === "ping") return;
-    if (e.type === "console") appendConsole(out, e.stream, e.line);
-    else if (e.type === "players") { const s = state.servers.get(id); if (s) { s.players = e.players; renderPlayers(s); } }
-    else if (e.type === "pings") { const s = state.servers.get(id); if (s) { s.pings = e.pings; renderPlayers(s); } }
-    else if (e.type === "status") {
-      const s = state.servers.get(id); if (s) Object.assign(s, e);
-      const inp = $("#con-in"); if (inp) inp.disabled = e.status !== "running";
-      const dot = $(".console-head .dot"); if (dot) dot.className = "dot " + viewStatus(e);
+    const s = state.servers.get(id);
+    if (s) {
+      if (e.type === "players") s.players = e.players;
+      else if (e.type === "pings") s.pings = e.pings;
+      else if (e.type === "status") Object.assign(s, e);
     }
+    onEvent(e, s);
   };
   es.onerror = () => {};
 }
@@ -1236,6 +1279,373 @@ function pingChip(ms) {
   return `<span class="ping ${q}" title="${ms} ms round-trip"><i></i>${ms}<small>ms</small></span>`;
 }
 
+/* --------------------------------------------------------------- players tab */
+/*
+ * The player log. Minecraft narrates every join, leave, chat line and death to
+ * its console, but that console is a ring buffer that dies with the process —
+ * so the backend keeps a durable copy per server and this tab reads it. The
+ * roster on the left is everyone who has ever been on and how long they stayed;
+ * the feed on the right is what happened, filtered by kind, by player or by
+ * free text. Live records arrive on the global event stream, so the feed keeps
+ * moving while you watch it.
+ */
+const PLOG_FILTERS = [
+  { id: "all", label: "Everything", types: [] },
+  { id: "sessions", label: "Joins & leaves", types: ["join", "leave"] },
+  { id: "chat", label: "Chat", types: ["chat"] },
+  { id: "death", label: "Deaths", types: ["death"] },
+  { id: "advancement", label: "Advancements", types: ["advancement"] },
+  { id: "command", label: "Commands", types: ["command"] },
+  { id: "server", label: "Server", types: ["server"] },
+];
+const PLOG_PAGE = 200; // events per request, and per "load older" click
+const PLOG_KEEP = 2000; // rows the browser holds before older ones are dropped
+
+const PLOG_TYPE = {
+  join: { label: "joined", icon: "check" },
+  leave: { label: "left", icon: "moon" },
+  chat: { label: "chat", icon: "chat" },
+  death: { label: "death", icon: "alert" },
+  advancement: { label: "advancement", icon: "star" },
+  command: { label: "command", icon: "terminal" },
+  server: { label: "server", icon: "cube" },
+};
+
+// View state survives re-renders (a live event repaints the feed) but resets
+// when the tab is pointed at a different server.
+function plogState(id) {
+  if (!state.plog || state.plog.id !== id)
+    state.plog = { id, filter: "all", q: "", player: null, find: "", rows: [], nextBefore: null, roster: null, total: 0 };
+  return state.plog;
+}
+const plogOpen = (id) => state.route.name === "server" && state.route.id === id && state.activeTab === "players";
+
+async function renderPlayersTab(id) {
+  const P = plogState(id);
+  const body = $("#tab-body");
+  body.innerHTML = `
+    <div class="plog-sum" id="plog-sum"></div>
+    <div class="plog">
+      <section class="plog-pane">
+        <header class="plog-pane-head">
+          <h4>${ico("users")} Roster</h4>
+          <div class="fm-find">
+            ${ico("search")}
+            <input type="text" id="plog-find-p" placeholder="Find a player…" autocomplete="off" spellcheck="false" value="${esc(P.find)}" />
+          </div>
+        </header>
+        <div id="plog-roster"><div class="players-empty">Loading…</div></div>
+      </section>
+
+      <section class="plog-pane">
+        <header class="plog-pane-head">
+          <h4>${ico("list")} Activity</h4>
+          <div class="plog-tools">
+            <div class="fm-find">
+              ${ico("search")}
+              <input type="text" id="plog-find-e" placeholder="Search the log…" autocomplete="off" spellcheck="false" value="${esc(P.q)}" />
+              <button class="fm-x" id="plog-find-e-x" title="Clear search" ${P.q ? "" : "hidden"}>×</button>
+            </div>
+            <a class="btn btn-sm" href="/api/servers/${encodeURIComponent(id)}/players/export" download title="Download the whole log as a spreadsheet">${ico("download")} CSV</a>
+            <button class="btn btn-sm btn-ghost btn-icon" id="plog-clear" title="Delete this server's recorded history">${ico("trash")}</button>
+          </div>
+        </header>
+        <div class="plog-chips" id="plog-chips">
+          ${PLOG_FILTERS.map((f) => `<button class="plog-chip ${P.filter === f.id ? "on" : ""}" data-f="${f.id}">${esc(f.label)}</button>`).join("")}
+        </div>
+        <div id="plog-who"></div>
+        <div class="plog-feed" id="plog-feed"><div class="players-empty">Loading…</div></div>
+        <div class="plog-foot" id="plog-foot"></div>
+      </section>
+    </div>`;
+
+  $$("#plog-chips .plog-chip").forEach((b) => (b.onclick = () => {
+    P.filter = b.dataset.f;
+    $$("#plog-chips .plog-chip").forEach((x) => x.classList.toggle("on", x.dataset.f === P.filter));
+    plogLoadFeed(id, { reset: true });
+  }));
+
+  const findE = $("#plog-find-e");
+  let timer = null;
+  findE.oninput = () => {
+    P.q = findE.value.trim();
+    $("#plog-find-e-x").hidden = !P.q;
+    clearTimeout(timer);
+    timer = setTimeout(() => plogLoadFeed(id, { reset: true }), 250);
+  };
+  $("#plog-find-e-x").onclick = () => { findE.value = ""; findE.oninput(); };
+
+  const findP = $("#plog-find-p");
+  findP.oninput = () => { P.find = findP.value.trim(); plogPaintRoster(id); };
+
+  $("#plog-clear").onclick = async () => {
+    if (!(await confirmDialog(
+      "Clear the player log?",
+      "<p class='muted'>Every recorded session, chat line and death for this server is deleted. The server itself and its world are untouched, and tracking starts again from now.</p>",
+      "Clear log"
+    ))) return;
+    try {
+      await API.del(`/api/servers/${id}/players/log`);
+      toast("Player log cleared.", "ok");
+      renderPlayersTab(id);
+    } catch (e) { toast(e.message, "err"); }
+  };
+
+  plogLoadRoster(id);
+  plogLoadFeed(id, { reset: true });
+
+  // Anyone online is still accruing time; tick their row rather than refetching.
+  if (renderPlayersTab._timer) clearInterval(renderPlayersTab._timer);
+  renderPlayersTab._timer = setInterval(() => {
+    if (!plogOpen(id)) return clearInterval(renderPlayersTab._timer);
+    $$("#plog-roster [data-since]").forEach((el) => (el.textContent = fmtUptime(Date.now() - Number(el.dataset.since))));
+  }, 1000);
+}
+
+/* ------------------------------------------------------------------- roster */
+
+async function plogLoadRoster(id) {
+  try {
+    const data = await API.get(`/api/servers/${id}/players`);
+    if (!plogOpen(id)) return;
+    plogState(id).roster = data;
+    plogPaintRoster(id);
+    plogPaintSummary(id);
+  } catch (e) {
+    const box = $("#plog-roster");
+    if (box) box.innerHTML = `<div class="players-empty">Couldn't load the roster: ${esc(e.message)}</div>`;
+  }
+}
+
+// Joins and leaves land in bursts; one refresh a beat later covers the lot.
+let plogRosterTimer = null;
+function plogRosterSoon(id) {
+  clearTimeout(plogRosterTimer);
+  plogRosterTimer = setTimeout(() => { if (plogOpen(id)) plogLoadRoster(id); }, 1200);
+}
+
+function plogPaintSummary(id) {
+  const box = $("#plog-sum");
+  const P = plogState(id);
+  if (!box || !P.roster) return;
+  const t = P.roster.totals;
+  const tile = (label, value, sub) =>
+    `<div class="plog-tile"><span class="label">${esc(label)}</span><span class="value">${value}</span>${sub ? `<span class="sub">${esc(sub)}</span>` : ""}</div>`;
+  box.innerHTML =
+    tile("Players seen", t.players, t.online ? `${t.online} online now` : "none online") +
+    tile("Sessions", t.sessions, P.roster.since ? "since " + fmtDay(P.roster.since) : "") +
+    tile("Time played", fmtUptime(t.playtimeMs), "everyone, all sessions") +
+    tile("Chat lines", t.chat, t.deaths ? `${t.deaths} death${t.deaths === 1 ? "" : "s"}` : "") +
+    tile("Events logged", P.roster.events, "kept for this server");
+}
+
+function plogPaintRoster(id) {
+  const box = $("#plog-roster");
+  const P = plogState(id);
+  if (!box || !P.roster) return;
+  const needle = (P.find || "").toLowerCase();
+  const rows = P.roster.players.filter((p) => !needle || p.name.toLowerCase().includes(needle));
+  if (!rows.length) {
+    box.innerHTML = `<div class="players-empty">${
+      P.roster.players.length ? "No player matches that." : "Nobody has joined this server yet — the log fills itself as people play."
+    }</div>`;
+    return;
+  }
+  box.innerHTML = rows
+    .map((p) => `
+      <div class="plog-row ${p.online ? "online" : ""} ${P.player === p.name ? "sel" : ""}" data-name="${esc(p.name)}" title="Open ${esc(p.name)}'s history">
+        <span class="head">${esc(p.name[0].toUpperCase())}</span>
+        <div class="who">
+          <div class="nm">${esc(p.name)} ${p.online ? '<span class="dot running"></span>' : ""}</div>
+          <div class="sub">${p.online
+            ? p.since
+              ? `on for <span data-since="${p.since}">${fmtUptime(p.sessionMs)}</span>`
+              : "online now"
+            : `last seen ${esc(fmtAgo(p.lastSeen))}`} · ${p.sessions} session${p.sessions === 1 ? "" : "s"}</div>
+        </div>
+        <div class="time">
+          <b>${fmtUptime(p.playtimeMs)}</b>
+          <span>played</span>
+        </div>
+      </div>`)
+    .join("");
+  $$("#plog-roster .plog-row").forEach((r) => (r.onclick = () => openPlayerCard(id, r.dataset.name)));
+}
+
+/* --------------------------------------------------------------------- feed */
+
+function plogFilterTypes(P) {
+  return (PLOG_FILTERS.find((f) => f.id === P.filter) || PLOG_FILTERS[0]).types;
+}
+
+async function plogLoadFeed(id, { reset = false } = {}) {
+  const P = plogState(id);
+  const qs = new URLSearchParams({ limit: String(PLOG_PAGE) });
+  const types = plogFilterTypes(P);
+  if (types.length) qs.set("type", types.join(","));
+  if (P.player) qs.set("player", P.player);
+  if (P.q) qs.set("q", P.q);
+  if (!reset && P.nextBefore) qs.set("before", String(P.nextBefore));
+  try {
+    const data = await API.get(`/api/servers/${id}/players/log?${qs}`);
+    if (!plogOpen(id)) return;
+    P.rows = reset ? data.events : P.rows.concat(data.events);
+    P.nextBefore = data.nextBefore;
+    P.total = data.total;
+  } catch (e) {
+    const feed = $("#plog-feed");
+    if (feed) feed.innerHTML = `<div class="players-empty">Couldn't load the log: ${esc(e.message)}</div>`;
+    return;
+  }
+  plogPaintFeed(id);
+}
+
+function plogPaintFeed(id) {
+  const P = plogState(id);
+  const feed = $("#plog-feed");
+  if (!feed) return;
+
+  $("#plog-who").innerHTML = P.player
+    ? `<div class="plog-only">Showing <b>${esc(P.player)}</b> only <button class="fm-x" id="plog-only-x" title="Show everyone">×</button></div>`
+    : "";
+  if (P.player) $("#plog-only-x").onclick = () => plogSetPlayer(id, null);
+
+  if (!P.rows.length) {
+    feed.innerHTML = `<div class="players-empty">${
+      P.q || P.player || plogFilterTypes(P).length ? "Nothing in the log matches that." : "Nothing logged yet. Start the server and the feed fills itself."
+    }</div>`;
+  } else {
+    let day = null;
+    feed.innerHTML = P.rows
+      .map((e) => {
+        const d = fmtDay(e.t);
+        const head = d === day ? "" : `<div class="plog-day">${esc(d)}</div>`;
+        day = d;
+        return head + plogEventHTML(e);
+      })
+      .join("");
+    $$("#plog-feed .pe-who").forEach((b) => (b.onclick = () => plogSetPlayer(id, b.dataset.name)));
+  }
+
+  const foot = $("#plog-foot");
+  foot.innerHTML = P.nextBefore
+    ? `<button class="btn btn-sm" id="plog-more">Load older</button><span class="muted">${P.rows.length} of ${P.total} events</span>`
+    : P.rows.length
+    ? `<span class="muted">That's the whole log — ${P.rows.length} event${P.rows.length === 1 ? "" : "s"}.</span>`
+    : "";
+  if ($("#plog-more")) $("#plog-more").onclick = () => plogLoadFeed(id);
+}
+
+function plogSetPlayer(id, name) {
+  const P = plogState(id);
+  P.player = name;
+  plogPaintRoster(id);
+  plogLoadFeed(id, { reset: true });
+}
+
+// One feed row. The player's name is a button everywhere it appears — clicking
+// it narrows the feed to that person, which is the question this tab exists for.
+function plogEventHTML(e) {
+  const kind = PLOG_TYPE[e.type] || PLOG_TYPE.server;
+  const meta = e.meta || {};
+  const who = e.player ? `<button class="pe-who" data-name="${esc(e.player)}">${esc(e.player)}</button>` : "";
+  let body;
+  if (e.type === "join")
+    body = `${who} joined the game${meta.ip ? ` <span class="pe-dim mono">${esc(meta.ip)}</span>` : ""}`;
+  else if (e.type === "leave")
+    body = `${who} left${meta.ms ? ` after <b>${fmtUptime(meta.ms)}</b>` : ""}${meta.reason ? ` <span class="pe-dim">(${esc(meta.reason)})</span>` : ""}`;
+  else if (e.type === "chat") body = `${who}<span class="pe-dim">:</span> ${esc(e.text)}`;
+  else if (e.type === "death") body = esc(e.text);
+  else if (e.type === "advancement") body = `${who} earned <span class="pe-adv">${esc(e.text)}</span>`;
+  else if (e.type === "command") body = `${who} ran <span class="mono pe-dim">${esc(e.text)}</span>`;
+  else body = `<span class="pe-dim">${esc(e.text)}</span>`;
+  return `
+    <div class="plog-ev ${esc(e.type)}">
+      <span class="pe-time" title="${esc(fmtWhen(e.t))}">${fmtClock(e.t)}</span>
+      <span class="pe-kind" title="${esc(kind.label)}">${ico(kind.icon)}</span>
+      <span class="pe-body">${body}</span>
+    </div>`;
+}
+
+// A record just landed. Prepend it if the open filter would have asked for it.
+function plogLive(e) {
+  if (state.activeTab !== "players") return;
+  if (!e.event) return renderPlayersTab(e.id); // the log was cleared out from under us
+  const P = plogState(e.id);
+  const types = plogFilterTypes(P);
+  const ev = e.event;
+  const hay = ((ev.text || "") + " " + (ev.player || "")).toLowerCase();
+  const wanted =
+    (!types.length || types.includes(ev.type)) &&
+    (!P.player || ev.player === P.player) &&
+    (!P.q || hay.includes(P.q.toLowerCase()));
+  if (wanted) {
+    P.rows.unshift(ev);
+    if (P.rows.length > PLOG_KEEP) P.rows.length = PLOG_KEEP;
+    P.total++;
+    plogPaintFeed(e.id);
+  }
+  plogRosterSoon(e.id);
+}
+
+/* ------------------------------------------------------------ player card */
+/* One player's whole history with this server: the totals, and the sessions
+ * they are made of — joined when, left when, and how long that was. */
+
+async function openPlayerCard(id, name) {
+  let p;
+  try {
+    p = (await API.get(`/api/servers/${id}/players/${encodeURIComponent(name)}`)).player;
+  } catch (e) { return toast(e.message, "err"); }
+
+  const stat = (label, value) => `<div class="pc-stat"><span>${esc(label)}</span><b>${value}</b></div>`;
+  const sessions = p.sessions.length
+    ? `<div class="pc-sessions">
+         <div class="pc-srow head"><span>Joined</span><span>Left</span><span>For</span><span>Ended by</span></div>
+         ${p.sessions.map((sn) => `
+           <div class="pc-srow${sn.to ? "" : " live"}">
+             <span>${esc(fmtWhen(sn.from))}</span>
+             <span>${sn.to ? esc(fmtWhen(sn.to)) : "still on"}</span>
+             <span>${fmtUptime(sn.ms)}</span>
+             <span class="muted">${esc(sn.reason || (sn.to ? "disconnected" : "—"))}</span>
+           </div>`).join("")}
+       </div>`
+    : `<p class="muted">No finished sessions recorded yet.</p>`;
+
+  modal(`
+    <div class="modal-head">
+      <h2>${esc(p.name)} ${p.online ? '<span class="pill running">● Online</span>' : ""}</h2>
+      <button class="modal-close">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="pc-stats">
+        ${stat("Time played", fmtUptime(p.playtimeMs))}
+        ${stat("Sessions", p.sessionCount)}
+        ${stat("Chat lines", p.chat)}
+        ${stat("Deaths", p.deaths)}
+        ${stat("Advancements", p.advancements)}
+        ${stat("Commands", p.commands)}
+      </div>
+      <div class="pc-facts">
+        <div><span>First seen</span><b>${esc(fmtWhen(p.firstSeen))}</b></div>
+        <div><span>Last seen</span><b>${p.online ? "now" : esc(fmtWhen(p.lastSeen))}</b></div>
+        <div><span>Last address</span><b class="mono">${esc(p.ip || "—")}</b></div>
+        <div><span>UUID</span><b class="mono small">${esc(p.uuid || "—")}</b></div>
+      </div>
+      <div class="section-title">Sessions${
+        p.sessionCount > p.sessions.length ? ` <span class="muted" style="text-transform:none;letter-spacing:0">— the last ${p.sessions.length} of ${p.sessionCount}</span>` : ""
+      }</div>
+      ${sessions}
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" id="pc-close">Close</button>
+      <button class="btn btn-primary" id="pc-filter">${ico("list")} Show in the log</button>
+    </div>`, { wide: true });
+
+  $("#pc-close").onclick = closeModal;
+  $("#pc-filter").onclick = () => { closeModal(); plogSetPlayer(id, p.name); };
+}
+
 /* ------------------------------------------------------- live patch (server) */
 function patchServerLive(e) {
   if (e.type === "status") {
@@ -1258,7 +1668,9 @@ function patchServerLive(e) {
   if (e.type === "players") {
     const p = $("#t-players"); const s = state.servers.get(e.id);
     if (p) p.innerHTML = `${e.players.length} <small>/ ${s.maxPlayers}</small>`;
+    if (state.activeTab === "players") plogRosterSoon(e.id);
   }
+  if (e.type === "playerlog") plogLive(e);
   if (e.type === "pings") {
     const s = state.servers.get(e.id); if (s) renderPlayers(s);
   }

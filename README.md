@@ -185,6 +185,8 @@ Details worth knowing:
 - **Accept the EULA** — one click, required by Mojang before first start.
 - **Console** — live output, a command box (with ↑/↓ history), quick commands,
   and a live player list.
+- **Players** — the log of who has been on: sessions with times and durations,
+  chat, deaths, advancements and commands. See below.
 - **Quick commands** — the buttons beside the console are yours to change. Hit
   **✎ Edit** on that box to add, rename, reorder or remove them; a label is
   optional (blank shows the command itself). The list is global — every server
@@ -197,6 +199,31 @@ Details worth knowing:
 - **Settings** — rename, change RAM/port/max-players, custom JVM args (Aikar's
   flags), Java override, the **public address** switch, the two **sleep**
   switches, or delete the server.
+
+## The player log
+
+Every server gets a **Players** tab: a permanent record of who has been on it,
+kept by the panel rather than by the console, so it survives restarts of the
+server *and* of the panel.
+
+- **Roster** — everyone who has ever joined, newest activity first, with total
+  time played, how many sessions that took, and when they were last seen.
+  Anyone online right now shows their current session ticking up.
+- **Activity** — the feed: joins and leaves (with how long the session lasted
+  and why it ended), chat, deaths, advancements and the commands players ran,
+  plus the server's own starts, stops and sleeps for context. Filter it by kind
+  with the chips, search it, or click any name to see just that person.
+- **Player card** — click someone in the roster for their totals and the
+  sessions behind them: joined at, left at, how long, and what ended it. Their
+  last known address and UUID are there too.
+- **CSV** — the whole log downloads as a spreadsheet. **🗑** clears the history
+  for that server (the world is untouched) and starts again from now.
+
+It all comes from what the server prints, so it works on vanilla, Paper,
+Purpur and modded alike with nothing to install. Deaths are the one fuzzy
+case — they are matched against the vanilla English death messages, so a
+server running a translation may log fewer of them. The last 20,000 events per
+server are kept; older ones roll off.
 
 ## Letting idle servers rest
 
@@ -298,12 +325,14 @@ MC_hoster/
 │  ├─ zip.js            read-only zip reader (zlib only) for .mrpack files
 │  ├─ playit.js         playit.gg agent, account link, per-server tunnels
 │  ├─ manager.js        server lifecycle, console, players, stats
+│  ├─ playerlog.js      durable per-server player history (sessions, chat…)
 │  ├─ sysmon.js         host CPU / RAM / disk sampling for the meters
 │  └─ store.js          persistence
 ├─ public/              the panel UI (index.html / style.css / app.js)
 ├─ data/                created at runtime — git-ignored, never travels
 │  ├─ servers/<id>/     each server's folder (world, jars, mods, configs)
 │  │  └─ .mchoster/     what the panel installed from Modrinth, for this server
+│  ├─ playerlog/<id>/   that server's player history (events + roster)
 │  ├─ runtimes/         Java runtimes the panel downloaded for you
 │  └─ playit/           playit agent binary + your agent key
 ├─ rack.json            Rack manifest
