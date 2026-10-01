@@ -185,6 +185,9 @@ Details worth knowing:
 - **Accept the EULA** — one click, required by Mojang before first start.
 - **Console** — live output, a command box (with ↑/↓ history), quick commands,
   and a live player list.
+- **Stats** — how the server is actually running: TPS, tick time, CPU,
+  memory, loaded entities, lag spikes and disk usage, with history charts.
+  See below.
 - **Players** — the log of who has been on: sessions with times and durations,
   chat, deaths, advancements and commands. See below.
 - **Quick commands** — the buttons beside the console are yours to change. Hit
@@ -199,6 +202,54 @@ Details worth knowing:
 - **Settings** — rename, change RAM/port/max-players, custom JVM args (Aikar's
   flags), Java override, the **public address** switch, the two **sleep**
   switches, or delete the server.
+
+## Server stats
+
+Every server gets a **Stats** tab, and its header shows **TPS** and **CPU**
+next to memory and players. The dashboard cards show TPS too, coloured by how
+the server is coping.
+
+- **TPS** — ticks per second. 20 is a server keeping up; below ~18 players
+  feel it. Labelled *Healthy*, *Struggling* or *Lagging*.
+- **Tick time (MSPT)** — milliseconds of work per tick, against the 50 ms
+  budget a tick gets at 20 TPS, with P95/P99 (vanilla) or min/max (Paper).
+- **CPU** — share of the whole machine the server's Java process is using,
+  and how many cores' worth that is.
+- **Memory** — what the process actually holds, against its heap limit.
+- **Loaded entities** — mobs, items and the rest in loaded chunks, all
+  dimensions. Thousands of dropped items is the classic cause of lag.
+- **Lag spikes** — every "Can't keep up! … 3120ms behind" the server prints,
+  timestamped, listed, and marked on the TPS chart.
+- **This run** — start time, boot time, in-game day, Java threads.
+- **Disk usage** — what is taking the space in the server folder.
+
+Charts cover the last **15 minutes** or **hour** at 5-second resolution, or
+the last **24 hours** at one point a minute (averages, with the worst TPS of
+each minute in the tooltip). The 24-hour history and the lag log are kept in
+`data/stats/` so they survive a panel restart.
+
+### Where the numbers come from
+
+No plugins or mods are needed. CPU and memory are read from the process
+(`/proc` on Linux; on Windows one small PowerShell helper stays running and is
+asked about every server at once, falling back to `tasklist` for memory if
+PowerShell is unavailable). Everything else is asked of the server's own
+console, quietly — the replies never show up in the Console tab:
+
+| Server | TPS / tick time from |
+|---|---|
+| Paper / Purpur | `tps` and `mspt` |
+| Forge | `forge tps` (plus per-dimension TPS) |
+| NeoForge | `neoforge tps` (`forge tps` on 1.20.1) |
+| Vanilla / Fabric / Quilt, 1.20.3+ | `tick query` |
+| Vanilla / Fabric / Quilt, older | not available — CPU, memory and lag spikes still work |
+
+Entity counts come from `execute if entity @e` (1.13+), the in-game day from
+`time query day`. Commands a server doesn't have are dropped after the first
+"Unknown command". The questions are only asked while the server is running
+and awake: a paused server is left alone, and so is an empty one with
+*sleep when empty* on, so the polling never keeps it from pausing. With nobody
+online they are asked a third as often, to keep `latest.log` quiet.
 
 ## The player log
 
@@ -324,7 +375,8 @@ MC_hoster/
 │  ├─ modrinth.js       Modrinth search/install, content manifest, .mrpack packs
 │  ├─ zip.js            read-only zip reader (zlib only) for .mrpack files
 │  ├─ playit.js         playit.gg agent, account link, per-server tunnels
-│  ├─ manager.js        server lifecycle, console, players, stats
+│  ├─ manager.js        server lifecycle, console, players
+│  ├─ perf.js           per-server TPS / CPU / memory / lag stats + history
 │  ├─ playerlog.js      durable per-server player history (sessions, chat…)
 │  ├─ sysmon.js         host CPU / RAM / disk sampling for the meters
 │  └─ store.js          persistence
@@ -333,6 +385,7 @@ MC_hoster/
 │  ├─ servers/<id>/     each server's folder (world, jars, mods, configs)
 │  │  └─ .mchoster/     what the panel installed from Modrinth, for this server
 │  ├─ playerlog/<id>/   that server's player history (events + roster)
+│  ├─ stats/<id>.json   that server's 24-hour stats history + lag spikes
 │  ├─ runtimes/         Java runtimes the panel downloaded for you
 │  └─ playit/           playit agent binary + your agent key
 ├─ rack.json            Rack manifest

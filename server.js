@@ -9,6 +9,7 @@
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
+const os = require("os");
 const { exec } = require("child_process");
 
 const store = require("./lib/store");
@@ -469,6 +470,23 @@ const server = http.createServer(async (req, res) => {
           filename: `${(def.name || "server").replace(/[^A-Za-z0-9_-]+/g, "-")}-players.csv`,
         });
 
+      // ---- performance ----
+      // Live numbers ride the SSE `stats` events; this is the backfill the
+      // Stats tab draws its charts from, plus the lag log and disk usage.
+      if (action === "stats" && !parts[4] && req.method === "GET")
+        return sendJSON(res, 200, {
+          current: manager.perf.current(id),
+          history: manager.perf.history(id, q.get("range") || "1h"),
+          lag: manager.perf.lagEvents(id).slice(0, 100),
+          host: { cores: os.cpus().length, totalMB: Math.round(os.totalmem() / 1048576) },
+        });
+      if (action === "stats" && parts[4] === "disk" && req.method === "GET")
+        return guard(async () => sendJSON(res, 200, { disk: await manager.perf.diskUsage(id) }))(req, res);
+      if (action === "stats" && parts[4] === "lag" && req.method === "DELETE") {
+        manager.perf.clearLag(id);
+        return sendJSON(res, 200, { ok: true });
+      }
+
       // properties
       if (action === "properties" && req.method === "GET")
         return sendJSON(res, 200, { text: manager.readProperties(id) });
@@ -609,6 +627,7 @@ function isWin() {
 function shutdown() {
   playit.stopAgent();
   playerlog.flushAll(); // history batched in memory would otherwise go with us
+  manager.perf.flushAll(); // so the 24-hour charts survive a panel restart
   manager.closeWakeListeners().catch(() => {});
   for (const s of store.all()) {
     const rtSlot = manager.slot(s.id);

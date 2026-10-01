@@ -39,6 +39,7 @@ const state = {
   consoleES: null, // EventSource for the open server console
   content: null, // last /content payload for the open server (installed mods)
   plog: null, // players tab: filters + the page of history it is showing
+  perf: null, // stats tab: chosen range + the history it is drawing
   activeTab: "console",
 };
 
@@ -336,7 +337,12 @@ async function handleGlobalEvent(e) {
     if (e.type === "status") Object.assign(s, e);
     if (e.type === "players") s.players = e.players;
     if (e.type === "pings") s.pings = e.pings;
-    if (e.type === "stats") s.stats = { memMB: e.memMB, cpu: e.cpu };
+    if (e.type === "stats") { const { type, id, point, ...st } = e; s.stats = st; }
+  }
+  // Lag spikes only matter to an open Stats tab.
+  if (e.type === "lag") {
+    if (state.route.name === "server" && state.route.id === e.id) patchServerLive(e);
+    return;
   }
   renderSidebar();
   if (state.route.name === "dashboard") renderDashboard();
@@ -618,6 +624,7 @@ function cardHTML(s) {
         <div class="stat">RAM <b>${fmtMem(s.memory)}</b></div>
         <div class="stat">Port <b>${s.port}</b></div>
         <div class="stat">Players <b>${(s.players || []).length}/${s.maxPlayers}</b></div>
+        ${s.status === "running" ? `<div class="stat">TPS <b class="tps-${(tpsState(s.stats && !s.stats.idle ? s.stats.tps : null, s.stats && s.stats.tpsTarget) || {}).cls || "none"}">${fmtTps(s.stats)}</b></div>` : ""}
       </div>
       <div class="srv-card-foot">
         ${s.playit && s.playit.enabled
@@ -989,10 +996,13 @@ async function renderServer(id) {
           <div class="bar"><i id="t-membar" style="width:${s.stats?.memMB ? Math.min(100, (s.stats.memMB / s.memory) * 100) : 0}%"></i></div>
         </div>
         <div class="stat-tile"><span class="label">Players</span><span class="value" id="t-players">${(s.players || []).length} <small>/ ${s.maxPlayers}</small></span></div>
+        <div class="stat-tile" title="Ticks per second — 20 means the server is keeping up"><span class="label">TPS</span><span class="value" id="t-tps">${tpsTileHTML(s)}</span></div>
+        <div class="stat-tile" title="Share of the whole machine this server is using"><span class="label">CPU</span><span class="value" id="t-cpu">${cpuTileHTML(s)}</span></div>
       </div>
 
       <div class="tabs" id="tabs">
         <div class="tab" data-tab="console">Console</div>
+        <div class="tab" data-tab="stats">Stats</div>
         <div class="tab" data-tab="players">Players</div>
         <div class="tab" data-tab="content">${esc(s.content ? s.content.noun : "Mods")}</div>
         <div class="tab" data-tab="files">Files</div>
@@ -1015,6 +1025,7 @@ async function renderServer(id) {
     if (!cur || state.route.id !== id) return clearInterval(renderServer._timer);
     const u = $("#t-uptime");
     if (u && cur.startedAt) u.textContent = fmtUptime(Date.now() - cur.startedAt);
+    if (state.activeTab === "stats") perfPaintSession(id);
   }, 1000);
 }
 
@@ -1061,12 +1072,13 @@ async function serverAction(id, act) {
 }
 
 /* ------------------------------------------------------------- tab switching */
-const TABS = ["console", "players", "content", "files", "properties", "settings"];
+const TABS = ["console", "stats", "players", "content", "files", "properties", "settings"];
 function selectTab(id, tab) {
   state.activeTab = tab;
   $$("#tabs .tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === tab));
   closeConsoleStream();
   if (tab === "console") renderConsoleTab(id);
+  else if (tab === "stats") renderStatsTab(id);
   else if (tab === "players") renderPlayersTab(id);
   else if (tab === "content") renderContentTab(id);
   else if (tab === "files") renderFilesTab(id);
@@ -1646,6 +1658,451 @@ async function openPlayerCard(id, name) {
   $("#pc-filter").onclick = () => { closeModal(); plogSetPlayer(id, p.name); };
 }
 
+/* ---------------------------------------------------------------- stats tab */
+/*
+ * How the server is running, not just whether it is. The backend (perf.js)
+ * asks the console for TPS / tick time / entities and samples the process for
+ * CPU and memory; this tab shows the latest numbers as tiles, a rolling
+ * history as small charts (one measure each — they don't share a scale), the
+ * "Can't keep up!" log, and what is taking the disk. Live points arrive on the
+ * global event stream every 5 s and are appended in place.
+ */
+const PERF_RANGES = [
+  { id: "15m", label: "15 min", span: 15 * 60000 },
+  { id: "1h", label: "1 hour", span: 3600000 },
+  { id: "24h", label: "24 hours", span: 86400000 },
+];
+const PERF_CHART_H = 132;
+
+function perfState(id) {
+  if (!state.perf || state.perf.id !== id)
+    state.perf = { id, range: "15m", data: null, disk: null, fetchedAt: 0, ro: null };
+  return state.perf;
+}
+const perfOpen = (id) => state.route.name === "server" && state.route.id === id && state.activeTab === "stats";
+
+// Shared verdicts, so the header tile, the dashboard card and this tab agree.
+function tpsState(tps, target = 20) {
+  if (tps == null) return null;
+  const r = tps / (target || 20);
+  return r >= 0.95 ? { cls: "good", label: "Healthy" } : r >= 0.75 ? { cls: "warn", label: "Struggling" } : { cls: "bad", label: "Lagging" };
+}
+// The header tiles beside Uptime / Memory.
+function tpsTileHTML(s) {
+  const st = s.stats || {};
+  if (s.status !== "running") return "—";
+  if (st.idle) return `<span class="muted">idle</span>`;
+  if (st.tps == null) return st.tpsSupport === "no" ? `— <small>n/a</small>` : "—";
+  const v = tpsState(st.tps, st.tpsTarget);
+  return `<span class="tps-${v.cls}">${st.tps.toFixed(1)}</span> <small>${st.mspt != null ? fmtMs(st.mspt) + " ms/tick" : v.label}</small>`;
+}
+function cpuTileHTML(s) {
+  const st = s.stats || {};
+  if (s.status !== "running" && s.status !== "starting") return "—";
+  return st.cpu != null ? `${st.cpu.toFixed(1)}<small> %</small>` : "—";
+}
+function fmtTps(st) {
+  return st && st.tps != null && !st.idle ? st.tps.toFixed(1) : "—";
+}
+const fmtMs = (v) => (v == null ? "—" : v < 10 ? v.toFixed(2) : v < 100 ? v.toFixed(1) : Math.round(v)) ;
+const fmtNum = (v) => (v == null ? "—" : Number(v).toLocaleString());
+
+function perfSourceLabel(src) {
+  return { paper: "Paper's tps / mspt commands", vanilla: "Minecraft's /tick query", forge: "Forge's /forge tps", neoforge: "NeoForge's /neoforge tps" }[src] || "the server console";
+}
+
+async function renderStatsTab(id) {
+  const P = perfState(id);
+  const body = $("#tab-body");
+  body.innerHTML = `
+    <div class="perf">
+      <div class="perf-tiles" id="perf-tiles"></div>
+      <div id="perf-note"></div>
+      <div id="perf-dims"></div>
+      <div class="perf-bar">
+        <h4>${ico("gauge")} History</h4>
+        <div class="seg" id="perf-range">
+          ${PERF_RANGES.map((r) => `<button class="seg-btn ${r.id === P.range ? "on" : ""}" data-r="${r.id}">${r.label}</button>`).join("")}
+        </div>
+      </div>
+      <div class="perf-charts" id="perf-charts"></div>
+      <div class="perf-lower">
+        <section class="plog-pane">
+          <header class="plog-pane-head">
+            <h4>${ico("alert")} Lag spikes</h4>
+            <div class="plog-tools"><button class="btn btn-sm btn-ghost" id="perf-lag-clear" title="Forget recorded lag spikes">${ico("trash")} Clear</button></div>
+          </header>
+          <div id="perf-lag" class="perf-lag"></div>
+        </section>
+        <div class="perf-side">
+          <section class="plog-pane">
+            <header class="plog-pane-head"><h4>${ico("clock")} This run</h4></header>
+            <div id="perf-session" class="perf-kv"></div>
+          </section>
+          <section class="plog-pane">
+            <header class="plog-pane-head">
+              <h4>${ico("folder")} Disk usage</h4>
+              <div class="plog-tools"><button class="btn btn-sm btn-ghost" id="perf-disk-refresh" title="Measure again">${ico("rotate")}</button></div>
+            </header>
+            <div id="perf-disk" class="perf-disk"><div class="players-empty">Measuring…</div></div>
+          </section>
+        </div>
+      </div>
+    </div>`;
+
+  $$("#perf-range .seg-btn").forEach((b) => (b.onclick = () => {
+    P.range = b.dataset.r;
+    $$("#perf-range .seg-btn").forEach((x) => x.classList.toggle("on", x === b));
+    perfLoad(id);
+  }));
+  $("#perf-lag-clear").onclick = async () => {
+    if (!(await confirmDialog("Clear lag spikes?", "<p class='muted'>Forgets the recorded “Can't keep up!” warnings for this server. Charts are kept.</p>", "Clear"))) return;
+    try { await API.del(`/api/servers/${id}/stats/lag`); if (P.data) P.data.lag = []; perfPaint(id); } catch (e) { toast(e.message, "err"); }
+  };
+  $("#perf-disk-refresh").onclick = () => perfLoadDisk(id, true);
+
+  if (P.ro) P.ro.disconnect();
+  if (window.ResizeObserver) {
+    let raf = 0;
+    P.ro = new ResizeObserver(() => { cancelAnimationFrame(raf); raf = requestAnimationFrame(() => perfOpen(id) && perfPaintCharts(id)); });
+    P.ro.observe($("#perf-charts"));
+  }
+
+  perfPaint(id); // tiles from the summary we already hold, before the fetch
+  await perfLoad(id);
+  perfLoadDisk(id);
+}
+
+async function perfLoad(id) {
+  const P = perfState(id);
+  try {
+    P.data = await API.get(`/api/servers/${id}/stats?range=${P.range}`);
+    P.fetchedAt = Date.now();
+    const s = state.servers.get(id);
+    if (s) s.stats = P.data.current;
+  } catch (e) {
+    toast(e.message, "err");
+  }
+  if (perfOpen(id)) perfPaint(id);
+}
+
+async function perfLoadDisk(id, force) {
+  const P = perfState(id);
+  const box = $("#perf-disk");
+  if (force && box) box.innerHTML = `<div class="players-empty">Measuring…</div>`;
+  try {
+    const { disk } = await API.get(`/api/servers/${id}/stats/disk${force ? "?t=" + Date.now() : ""}`);
+    P.disk = disk;
+  } catch (e) {
+    if (box) box.innerHTML = `<div class="players-empty">${esc(e.message)}</div>`;
+    return;
+  }
+  if (perfOpen(id)) perfPaintDisk(id);
+}
+
+// A live sample: refresh the tiles, and extend the fine-grained history.
+function perfLive(e) {
+  const P = perfState(e.id);
+  if (!P.data) return;
+  const { type, id, point, ...cur } = e;
+  P.data.current = cur;
+  if (point && P.range !== "24h") {
+    P.data.history.points.push(point);
+    const span = PERF_RANGES.find((r) => r.id === P.range).span;
+    const from = Date.now() - span;
+    while (P.data.history.points.length && P.data.history.points[0].t < from) P.data.history.points.shift();
+  } else if (P.range === "24h" && Date.now() - P.fetchedAt > 60000) {
+    return perfLoad(e.id); // a new minute has been averaged
+  }
+  perfPaint(e.id);
+}
+
+function perfPaint(id) {
+  perfPaintTiles(id);
+  perfPaintCharts(id);
+  perfPaintLag(id);
+  perfPaintSession(id);
+}
+
+function perfTile(label, value, sub, opts = {}) {
+  const bar = opts.pct != null
+    ? `<div class="bar"><i class="${opts.barCls || ""}" style="width:${Math.max(0, Math.min(100, opts.pct))}%"></i></div>` : "";
+  const verdict = opts.verdict ? `<span class="verdict ${opts.verdict.cls}">${opts.verdict.label}</span>` : "";
+  return `<div class="plog-tile perf-tile" ${opts.title ? `title="${esc(opts.title)}"` : ""}>
+      <span class="label">${label}</span>
+      <span class="value">${value}${verdict}</span>
+      ${bar}
+      <span class="sub">${sub}</span>
+    </div>`;
+}
+
+function perfPaintTiles(id) {
+  const box = $("#perf-tiles");
+  if (!box) return;
+  const s = state.servers.get(id) || {};
+  const P = perfState(id);
+  const st = (P.data && P.data.current) || s.stats || {};
+  const host = (P.data && P.data.host) || { cores: state.sys ? state.sys.host.cores : 0 };
+  const up = s.status === "running" || s.status === "starting";
+  const live = up && !st.idle;
+
+  // TPS
+  let tpsSub;
+  if (!up) tpsSub = "server offline";
+  else if (st.idle) tpsSub = s.paused ? "paused — nothing is ticking" : "empty — not asking, so it can pause";
+  else if (st.tpsSupport === "no") tpsSub = "this server can't report it";
+  else if (st.tps == null) tpsSub = "asking the server…";
+  else if (st.tps1m != null) tpsSub = `1m ${st.tps1m} · 5m ${st.tps5m ?? "—"} · 15m ${st.tps15m ?? "—"}`;
+  else tpsSub = `target ${st.tpsTarget || 20}${st.tickState && st.tickState !== "normal" ? " · " + st.tickState : ""}`;
+  const verdict = live ? tpsState(st.tps, st.tpsTarget) : null;
+
+  // Tick time: share of the 50 ms budget a tick may take at 20 TPS.
+  const budget = 1000 / (st.tpsTarget || 20);
+  const msptSub = !live || st.mspt == null ? `budget ${budget} ms per tick`
+    : st.msptP95 != null ? `P95 ${fmtMs(st.msptP95)} · P99 ${fmtMs(st.msptP99)} ms`
+    : st.msptMax != null ? `min ${fmtMs(st.msptMin)} · max ${fmtMs(st.msptMax)} ms`
+    : `${Math.round((st.mspt / budget) * 100)}% of the ${budget} ms budget`;
+  const msptPct = live && st.mspt != null ? (st.mspt / budget) * 100 : 0;
+
+  const memPct = st.memMB && s.memory ? (st.memMB / s.memory) * 100 : 0;
+  const players = (s.players || []).length;
+
+  box.innerHTML = [
+    perfTile("TPS", live ? fmtTps(st) : "—", tpsSub, { verdict, title: "Ticks per second — 20 is a server keeping up. Below ~18 players start to notice." }),
+    perfTile("Tick time", live && st.mspt != null ? `${fmtMs(st.mspt)}<small> ms</small>` : "—", msptSub,
+      { pct: msptPct, barCls: meterState(msptPct), title: "Milliseconds of work per tick (MSPT). Over 50 ms and TPS starts to drop." }),
+    perfTile("CPU", up && st.cpu != null ? `${st.cpu.toFixed(1)}<small> %</small>` : "—",
+      up && st.cores != null ? `≈ ${st.cores.toFixed(2)} of ${host.cores} cores` : up ? "measuring…" : "server offline",
+      { pct: up ? st.cpu || 0 : 0, barCls: meterState(st.cpu || 0), title: "Share of the whole machine this server's Java process is using" }),
+    perfTile("Memory", up && st.memMB ? `${fmtMem(st.memMB)}<small> / ${fmtMem(s.memory)}</small>` : "—",
+      up ? `process${st.threads ? ` · ${st.threads} threads` : ""}` : "server offline",
+      { pct: up ? memPct : 0, barCls: memPct > 100 ? "hot" : "", title: "What the Java process holds in RAM. It can sit above the -Xmx heap limit — the JVM needs some memory outside the heap." }),
+    perfTile("Entities", live && st.entities != null ? fmtNum(st.entities) : "—", "loaded, all dimensions",
+      { title: "Mobs, items, minecarts… everything with a position in loaded chunks. Thousands of dropped items or mobs in a farm is the classic cause of lag." }),
+    perfTile("Players", `${players}<small> / ${s.maxPlayers || 20}</small>`, up ? `peak ${Math.max(st.peakPlayers || 0, players)} this run` : "server offline"),
+    perfTile("Lag spikes", up ? fmtNum(st.lagCount || 0) : "—",
+      st.lagLast ? `${(st.lagLast.ms / 1000).toFixed(1)} s behind, ${fmtAgo(st.lagLast.t)}` : up ? "none this run" : "server offline",
+      { title: "\"Can't keep up!\" warnings from the server — moments it fell seconds behind." }),
+  ].join("");
+
+  const note = $("#perf-note");
+  if (note) {
+    note.innerHTML = up && st.tpsSupport === "no"
+      ? `<div class="banner perf-banner">${ico("alert")}<div>This server has no command that reports TPS. That needs Minecraft <b>1.20.3+</b> (any loader — it has <code>/tick query</code>), or Paper, Purpur, Forge or NeoForge on any version. CPU, memory, players and lag spikes are still tracked.</div></div>`
+      : "";
+  }
+  const dims = $("#perf-dims");
+  if (dims) {
+    dims.innerHTML = live && st.dims && st.dims.length
+      ? `<div class="perf-dimrow">${st.dims.map((d) => `<span class="perf-dim"><b>${esc(d.name)}</b> ${d.tps != null ? d.tps.toFixed(1) : "—"} TPS · ${fmtMs(d.mspt)} ms</span>`).join("")}</div>`
+      : "";
+  }
+}
+
+// One chart per measure — never two scales on one axis.
+function perfCharts(id) {
+  const s = state.servers.get(id) || {};
+  const st = (state.perf.data && state.perf.data.current) || {};
+  const target = st.tpsTarget || 20;
+  const budget = 1000 / target;
+  return [
+    { key: "tps", title: "TPS", unit: "TPS", fmt: (v) => v.toFixed(1), yMax: () => target, ref: { v: target, label: `target ${target}` }, lag: true },
+    { key: "mspt", title: "Tick time", unit: "ms", fmt: fmtMs, yMax: (m) => niceMax(Math.max(m, budget * 1.1)), ref: { v: budget, label: `${budget} ms budget` } },
+    { key: "cpu", title: "CPU", unit: "%", fmt: (v) => v.toFixed(1), yMax: (m) => Math.min(100, niceMax(Math.max(m, 10))) },
+    { key: "mem", title: "Memory", unit: "", fmt: (v) => fmtMem(Math.round(v)), yMax: (m) => niceMax(Math.max(m, s.memory || 0) * 1.05), ref: s.memory ? { v: s.memory, label: "heap limit" } : null },
+    { key: "players", title: "Players", unit: "online", fmt: (v) => String(Math.round(v)), yMax: (m) => Math.max(4, niceMax(m)), step: true },
+    { key: "entities", title: "Loaded entities", unit: "", fmt: (v) => fmtNum(Math.round(v)), yMax: (m) => niceMax(Math.max(m, 10)) },
+  ];
+}
+
+function niceMax(v) {
+  if (!(v > 0)) return 1;
+  const p = Math.pow(10, Math.floor(Math.log10(v)));
+  for (const m of [1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10]) if (m * p >= v) return m * p;
+  return 10 * p;
+}
+
+function perfPaintCharts(id) {
+  const box = $("#perf-charts");
+  const P = perfState(id);
+  if (!box || !P.data) return;
+  const charts = perfCharts(id);
+  if (box.children.length !== charts.length) {
+    box.innerHTML = charts.map((c) => `
+      <div class="perf-chart" data-k="${c.key}">
+        <div class="pc-head"><span class="pc-title">${c.title}</span>${c.lag ? `<span class="pc-key"><i class="lag-key"></i>lag spike</span>` : ""}<b class="pc-now"></b></div>
+        <div class="pc-plot"><svg height="${PERF_CHART_H}"></svg><div class="pc-tip" hidden></div></div>
+      </div>`).join("");
+  }
+  const range = PERF_RANGES.find((r) => r.id === P.range);
+  const now = Date.now();
+  const x0 = now - range.span;
+  const pts = P.data.history.points.filter((p) => p && p.t >= x0);
+  const step = P.data.history.step || 5000;
+  for (const c of charts) drawPerfChart($(`.perf-chart[data-k="${c.key}"]`, box), c, pts, { x0, x1: now, step, lag: c.lag ? (P.data.lag || []) : null });
+}
+
+function drawPerfChart(card, c, pts, dom) {
+  const svg = $("svg", card);
+  const plot = $(".pc-plot", card);
+  const W = Math.max(200, plot.clientWidth || 400);
+  const H = PERF_CHART_H;
+  const pad = { l: 40, r: 10, t: 10, b: 20 };
+  const iw = W - pad.l - pad.r, ih = H - pad.t - pad.b;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.setAttribute("width", W);
+
+  const vals = pts.map((p) => p[c.key]).filter((v) => v != null);
+  const last = [...pts].reverse().find((p) => p[c.key] != null);
+  $(".pc-now", card).textContent = last ? `${c.fmt(last[c.key])}${c.unit ? " " + c.unit : ""}` : "";
+  const yMax = c.yMax(vals.length ? Math.max(...vals) : 0) || 1;
+  const X = (t) => pad.l + ((t - dom.x0) / (dom.x1 - dom.x0)) * iw;
+  const Y = (v) => pad.t + ih - (Math.max(0, Math.min(v, yMax)) / yMax) * ih;
+
+  // Recessive grid: four bands, labels in muted ink.
+  let g = "";
+  for (let i = 0; i <= 4; i++) {
+    const v = (yMax / 4) * i, y = Y(v);
+    g += `<line class="grid" x1="${pad.l}" x2="${W - pad.r}" y1="${y}" y2="${y}"/>`;
+    g += `<text class="ax" x="${pad.l - 6}" y="${y + 3.5}" text-anchor="end">${esc(axisFmt(c, v))}</text>`;
+  }
+  const span = dom.x1 - dom.x0;
+  for (let i = 0; i <= 4; i++) {
+    const t = dom.x0 + (span / 4) * i;
+    const anchor = i === 0 ? "start" : i === 4 ? "end" : "middle";
+    g += `<text class="ax" x="${X(t)}" y="${H - 5}" text-anchor="${anchor}">${i === 4 ? "now" : esc(timeTick(t, span))}</text>`;
+  }
+  if (c.ref && c.ref.v <= yMax) {
+    const y = Y(c.ref.v);
+    // Labelled at the old end of the window: the new end is where the data is.
+    g += `<line class="ref" x1="${pad.l}" x2="${W - pad.r}" y1="${y}" y2="${y}"/><text class="ref-l" x="${pad.l + 4}" y="${y < pad.t + 12 ? y + 11 : y - 4}">${esc(c.ref.label)}</text>`;
+  }
+
+  // Break the line wherever the server was off or the value unknown.
+  const segs = [];
+  let cur = null, prevT = null;
+  for (const p of pts) {
+    const v = p[c.key];
+    if (v == null || (prevT != null && p.t - prevT > dom.step * 2.5)) { cur = null; }
+    if (v != null) {
+      if (!cur) segs.push((cur = []));
+      cur.push([X(p.t), Y(v)]);
+    }
+    prevT = p.t;
+  }
+  let lines = "";
+  for (const sg of segs) {
+    let d = "";
+    sg.forEach(([x, y], i) => {
+      if (i === 0) d += `M${x.toFixed(1)},${y.toFixed(1)}`;
+      else if (c.step) d += `H${x.toFixed(1)}V${y.toFixed(1)}`;
+      else d += `L${x.toFixed(1)},${y.toFixed(1)}`;
+    });
+    const base = Y(0).toFixed(1);
+    lines += `<path class="area" d="${d}V${base}H${sg[0][0].toFixed(1)}Z"/>`;
+    lines += sg.length === 1
+      ? `<circle class="dot" cx="${sg[0][0]}" cy="${sg[0][1]}" r="2.5"/>`
+      : `<path class="line" d="${d}"/>`;
+  }
+
+  let marks = "";
+  if (dom.lag)
+    for (const l of dom.lag) {
+      if (l.t < dom.x0 || l.t > dom.x1) continue;
+      const x = X(l.t);
+      marks += `<path class="lag-mark" d="M${x - 4},${pad.t} L${x + 4},${pad.t} L${x},${pad.t + 6}Z"><title>${esc(fmtClock(l.t))} — ${l.ms} ms behind (${l.ticks} ticks)</title></path>`;
+    }
+
+  const empty = vals.length ? "" : `<text class="ax empty" x="${pad.l + iw / 2}" y="${pad.t + ih / 2}" text-anchor="middle">${c.key === "tps" || c.key === "mspt" || c.key === "entities" ? "No readings in this window" : "No data in this window yet"}</text>`;
+  svg.innerHTML = `${g}${lines}${marks}${empty}<line class="xhair" y1="${pad.t}" y2="${pad.t + ih}" visibility="hidden"/><circle class="xdot" r="3.5" visibility="hidden"/><rect class="hit" x="${pad.l}" y="0" width="${iw}" height="${H}"/>`;
+
+  // Crosshair + tooltip on the nearest sample.
+  const tip = $(".pc-tip", card);
+  const hx = $(".xhair", svg), hd = $(".xdot", svg), hit = $(".hit", svg);
+  const withVal = pts.filter((p) => p[c.key] != null);
+  hit.onmousemove = (ev) => {
+    if (!withVal.length) return;
+    const r = svg.getBoundingClientRect();
+    const t = dom.x0 + ((ev.clientX - r.left - pad.l) / iw) * span;
+    let best = withVal[0];
+    for (const p of withVal) if (Math.abs(p.t - t) < Math.abs(best.t - t)) best = p;
+    const x = X(best.t), y = Y(best[c.key]);
+    hx.setAttribute("x1", x); hx.setAttribute("x2", x); hx.setAttribute("visibility", "visible");
+    hd.setAttribute("cx", x); hd.setAttribute("cy", y); hd.setAttribute("visibility", "visible");
+    const extra = c.key === "tps" && best.tpsMin != null && best.tpsMin < best.tps ? ` <span>low ${best.tpsMin.toFixed(1)}</span>` : "";
+    tip.innerHTML = `<b>${esc(c.fmt(best[c.key]))}${c.unit ? " " + c.unit : ""}</b>${extra}<span>${esc(fmtWhen(best.t))}</span>`;
+    tip.hidden = false;
+    const tw = tip.offsetWidth;
+    tip.style.left = Math.max(0, Math.min(W - tw, x - tw / 2)) + "px";
+  };
+  hit.onmouseleave = () => { tip.hidden = true; hx.setAttribute("visibility", "hidden"); hd.setAttribute("visibility", "hidden"); };
+}
+
+function axisFmt(c, v) {
+  if (c.key === "mem") return v >= 1024 ? (v / 1024).toFixed(v % 1024 ? 1 : 0) + "G" : Math.round(v) + "M";
+  if (v >= 10000) return Math.round(v / 1000) + "k";
+  return Number.isInteger(v) ? String(v) : v.toFixed(1);
+}
+function timeTick(t, span) {
+  const d = new Date(t);
+  return span > 6 * 3600000
+    ? d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false })
+    : "-" + Math.round((Date.now() - t) / 60000) + "m";
+}
+
+function perfPaintLag(id) {
+  const box = $("#perf-lag");
+  const P = perfState(id);
+  if (!box || !P.data) return;
+  const lag = P.data.lag || [];
+  box.innerHTML = lag.length
+    ? `<div class="perf-lag-list">${lag.slice(0, 60).map((l) => `
+        <div class="perf-lag-row">
+          <span class="t mono">${esc(fmtWhen(l.t))}</span>
+          <span class="bar"><i class="${l.ms >= 10000 ? "hot" : l.ms >= 4000 ? "warn" : ""}" style="width:${Math.min(100, (l.ms / 15000) * 100)}%"></i></span>
+          <span class="v"><b>${fmtNum(l.ms)} ms</b> behind <small>${fmtNum(l.ticks)} ticks skipped</small></span>
+        </div>`).join("")}</div>`
+    : `<div class="players-empty">No lag spikes recorded — the server has kept up.<br><small class="muted">A spike is logged whenever the server prints “Can't keep up!”, which it does once it falls 2 s or more behind.</small></div>`;
+}
+
+function perfPaintSession(id) {
+  const box = $("#perf-session");
+  if (!box) return;
+  const s = state.servers.get(id) || {};
+  const P = perfState(id);
+  const st = (P.data && P.data.current) || s.stats || {};
+  const up = !!s.startedAt;
+  const rows = [
+    ["Started", up ? fmtWhen(s.startedAt) : "—"],
+    ["Uptime", up ? fmtUptime(Date.now() - s.startedAt) : "—"],
+    ["Boot time", st.startupSec != null ? st.startupSec + " s" : "—"],
+    ["In-game day", st.day != null ? fmtNum(st.day) : "—"],
+    ["Java threads", st.threads ? fmtNum(st.threads) : "—"],
+    ["Heap limit", fmtMem(s.memory || 0)],
+    ["TPS from", up && st.tpsSource ? perfSourceLabel(st.tpsSource) : up && st.tpsSupport === "no" ? "not available" : "—"],
+  ];
+  box.innerHTML = rows.map(([k, v]) => `<div><span>${k}</span><b>${esc(v)}</b></div>`).join("");
+}
+
+function perfPaintDisk(id) {
+  const box = $("#perf-disk");
+  const P = perfState(id);
+  if (!box || !P.disk) return;
+  const d = P.disk;
+  const top = d.entries.slice(0, 7);
+  const rest = d.entries.slice(7).reduce((a, e) => a + e.bytes, 0);
+  if (rest) top.push({ name: `${d.entries.length - 7} more`, bytes: rest, other: true });
+  const max = Math.max(1, ...top.map((e) => e.bytes));
+  box.innerHTML = `
+    <div class="perf-disk-total"><b>${fmtBytes(d.total)}</b> <span class="muted">in the server folder · measured ${fmtAgo(d.at)}</span></div>
+    ${top.map((e) => `
+      <div class="perf-disk-row" title="${esc(e.name)} — ${fmtBytes(e.bytes)}">
+        <span class="n">${e.other ? "" : ico(e.dir ? "folder" : "file")} ${esc(e.name)}</span>
+        <span class="bar"><i style="width:${(e.bytes / max) * 100}%"></i></span>
+        <span class="v mono">${fmtBytes(e.bytes)}</span>
+      </div>`).join("")}`;
+}
+
 /* ------------------------------------------------------- live patch (server) */
 function patchServerLive(e) {
   if (e.type === "status") {
@@ -1659,16 +2116,25 @@ function patchServerLive(e) {
     // The install finishing is what tells us which loader the server runs, so a
     // content tab that was showing "still installing" can now do its job.
     if (state.activeTab === "content" && s.content && !$("#md-list")) renderContentTab(s.id);
+    if (perfOpen(s.id)) { perfPaintTiles(s.id); perfPaintSession(s.id); }
   }
   if (e.type === "stats") {
     const s = state.servers.get(e.id);
     const m = $("#t-mem"); if (m) m.innerHTML = `${e.memMB ? fmtMem(e.memMB) : "—"} <small>/ ${fmtMem(s.memory)}</small>`;
     const bar = $("#t-membar"); if (bar) bar.style.width = Math.min(100, (e.memMB / s.memory) * 100) + "%";
+    const tps = $("#t-tps"); if (tps) tps.innerHTML = tpsTileHTML(s);
+    const cpu = $("#t-cpu"); if (cpu) cpu.innerHTML = cpuTileHTML(s);
+    if (perfOpen(e.id)) perfLive(e);
+  }
+  if (e.type === "lag" && perfOpen(e.id)) {
+    const P = perfState(e.id);
+    if (P.data) { P.data.lag = [e.lag, ...(P.data.lag || [])]; perfPaintLag(e.id); perfPaintCharts(e.id); }
   }
   if (e.type === "players") {
     const p = $("#t-players"); const s = state.servers.get(e.id);
     if (p) p.innerHTML = `${e.players.length} <small>/ ${s.maxPlayers}</small>`;
     if (state.activeTab === "players") plogRosterSoon(e.id);
+    if (perfOpen(e.id)) perfPaintTiles(e.id);
   }
   if (e.type === "playerlog") plogLive(e);
   if (e.type === "pings") {

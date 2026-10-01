@@ -6,6 +6,52 @@ the day the work landed.
 
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-10-01
+
+### Added
+
+- **A Stats tab: how the server is actually running.** Up to now the panel
+  knew a server was up and roughly how much RAM it held; CPU was a hard-coded
+  zero. Each server now has a Stats tab with **TPS** (labelled Healthy,
+  Struggling or Lagging), **tick time** against the 50 ms budget (with
+  P95/P99 or min/max where the server gives them), **CPU** as a share of the
+  machine and in cores, **memory** against the heap limit, **loaded
+  entities**, **players** with this run's peak, and a count of **lag
+  spikes**. Forge and NeoForge also get TPS per dimension.
+- **History charts.** One small chart per measure — TPS, tick time, CPU,
+  memory, players, entities — over the last 15 minutes, hour (5-second
+  points) or 24 hours (one-minute averages). Hover for exact values; lag
+  spikes are marked on the TPS chart. The 24-hour history is saved in
+  `data/stats/`, so a panel restart doesn't wipe it.
+- **A lag log.** Every "Can't keep up!" the server prints is recorded with
+  how far behind it fell, listed on the tab and kept across restarts.
+- **This run and disk usage.** Start time, boot time, in-game day and Java
+  threads, plus a breakdown of what is taking space in the server folder.
+- **TPS and CPU in the server header, TPS on dashboard cards.**
+
+### Changed
+
+- **CPU is real now.** Linux reads it from `/proc`; Windows keeps one small
+  PowerShell helper running and asks it about every server at once — cheaper
+  than the `tasklist` call per server every few seconds it replaces, and the
+  only built-in way to get CPU time precisely. If PowerShell won't start the
+  panel falls back to `tasklist` for memory.
+- **Player ping probes share the new console queue.** Every console question
+  the panel asks — ping, TPS, entities — now goes out one at a time, so each
+  reply (and each "Unknown command") is paired with the command that caused
+  it, and none of them leak into the Console tab.
+
+### Notes
+
+- Nothing to install. TPS comes from commands the server already has: `tps`
+  and `mspt` on Paper/Purpur, `forge tps` / `neoforge tps`, and vanilla's
+  `tick query` on 1.20.3+ (which covers Fabric and Quilt). Older vanilla,
+  Fabric and Quilt servers can't report TPS; the tab says so and still tracks
+  CPU, memory, players and lag spikes.
+- The panel won't nudge a resting server: nothing is asked while it's paused,
+  or while it's empty with *sleep when empty* on, so polling never stops it
+  from pausing.
+
 ## 2026-09-11
 
 ### Added
