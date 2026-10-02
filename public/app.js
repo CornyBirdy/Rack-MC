@@ -149,7 +149,17 @@ async function copyText(text) {
   }
 }
 
+// A modal that holds something open (an event stream) registers its teardown
+// here; it runs when the modal closes or another one replaces it.
+let modalCleanup = null;
+function runModalCleanup() {
+  const fn = modalCleanup;
+  modalCleanup = null;
+  if (fn) fn();
+}
+
 function modal(html, { wide = false } = {}) {
+  runModalCleanup();
   const root = $("#modal-root");
   root.innerHTML = `<div class="modal-bg"><div class="modal ${wide ? "wide" : ""}">${html}</div></div>`;
   const bg = $(".modal-bg", root);
@@ -157,7 +167,7 @@ function modal(html, { wide = false } = {}) {
   paintRanges(root);
   return root;
 }
-function closeModal() { $("#modal-root").innerHTML = ""; }
+function closeModal() { runModalCleanup(); $("#modal-root").innerHTML = ""; }
 
 /* ------------------------------------------------------------- build badge */
 /*
@@ -314,6 +324,7 @@ async function handleGlobalEvent(e) {
     state.playit = e.playit;
     renderSidebar();
     if ($("#playit-section")) renderPlayitSection();
+    if ($("#plc-out")) paintPlayitConsoleHead();
     if (state.route.name === "server" && $("#st-playit")) renderServerPlayit(state.route.id);
     return;
   }
@@ -392,7 +403,8 @@ function renderSidebar() {
       const dot = pl.agent === "online" ? "running" : pl.agent === "error" ? "crashed" : "starting";
       pchip.style.display = "flex";
       pchip.innerHTML = `<span class="dot ${dot}"></span> playit ${esc(PLAYIT_AGENT_LABEL[pl.agent] || pl.agent)}`;
-      pchip.onclick = openSettings;
+      pchip.onclick = openPlayitConsole;
+      pchip.title = "playit.gg agent — click for its console";
       pchip.style.cursor = "pointer";
     } else pchip.style.display = "none";
   }
@@ -3947,10 +3959,12 @@ function renderPlayitSection() {
     ${accountNote ? `<div class="banner warn" style="margin:0 0 12px">${esc(accountNote)} <a href="https://playit.gg/account" target="_blank" rel="noopener" style="text-decoration:underline">Open playit.gg</a></div>` : ""}
     <p class="hint" style="margin-top:0">Turn a public address on per server, in that server's <b>Settings</b> tab. Tunnels stay up while the panel runs.</p>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn btn-sm" id="pl-console">${ico("terminal")} Agent console</button>
       <button class="btn btn-sm" id="pl-refresh">${ico("rotate")} Refresh tunnels</button>
       <a class="btn btn-sm" href="https://playit.gg/account/tunnels" target="_blank" rel="noopener">Manage at playit.gg</a>
       <button class="btn btn-sm btn-red" id="pl-unlink">Unlink account</button>
     </div>`;
+  $("#pl-console").onclick = openPlayitConsole;
   $("#pl-refresh").onclick = async () => {
     const btn = $("#pl-refresh");
     btn.disabled = true; btn.textContent = "Refreshing…";
@@ -3964,6 +3978,70 @@ function renderPlayitSection() {
     try { await playitCall("/api/playit/unlink"); toast("Unlinked from playit.gg.", "ok"); renderPlayitSection(); renderSidebar(); }
     catch (e) { toast(e.message, "err"); }
   };
+}
+
+/* The agent's own output, live. It takes no commands, so unlike a server
+ * console there's no input line — just the log, a filter, and a restart for
+ * when the agent is stuck or the retry loop has given up on it. */
+function openPlayitConsole() {
+  modal(`
+    <div class="modal-head"><h2>playit agent console</h2><button class="modal-close">×</button></div>
+    <div class="modal-body">
+      <div class="console plc">
+        <div class="console-head">
+          <span class="t" id="plc-status"></span>
+          <span class="plc-tools">
+            <label class="plc-filter"><input type="checkbox" id="plc-problems" /> Hide routine output</label>
+            <button class="btn btn-sm btn-ghost" id="plc-clear">Clear</button>
+          </span>
+        </div>
+        <div class="console-out" id="plc-out"></div>
+      </div>
+      <p class="hint" style="margin-bottom:0">Everything the playit agent prints, live. MC Hoster's own playit messages are highlighted; errors and warnings are red. The agent takes no commands — if it's stuck, restart it.</p>
+    </div>
+    <div class="modal-foot"><span></span><div style="display:flex;gap:10px">
+      <button class="btn btn-ghost" data-x>Close</button>
+      <button class="btn" id="plc-restart">${ico("rotate")} Restart agent</button>
+    </div></div>`, { wide: true });
+  $(".modal-close").onclick = $("[data-x]").onclick = closeModal;
+
+  const out = $("#plc-out");
+  const empty = () => (out.innerHTML = `<div class="ln sys plc-empty">Nothing logged yet.</div>`);
+  const es = new EventSource("/api/playit/console");
+  // Every (re)connect replays the whole log, so start from a clean slate.
+  es.onopen = empty;
+  es.onmessage = (ev) => {
+    let e; try { e = JSON.parse(ev.data); } catch { return; }
+    if (e.type !== "log") return;
+    $(".plc-empty", out)?.remove();
+    // The agent stamps its own lines; ours get the time added.
+    appendConsole(out, e.stream, e.stream === "sys" ? `[${new Date(e.t).toLocaleTimeString()}] ${e.line}` : e.line);
+  };
+  es.onerror = () => {}; // browser auto-reconnects
+  modalCleanup = () => es.close();
+
+  $("#plc-problems").onchange = (ev) => out.classList.toggle("only-problems", ev.target.checked);
+  $("#plc-clear").onclick = empty;
+  $("#plc-restart").onclick = async () => {
+    const btn = $("#plc-restart");
+    btn.disabled = true;
+    try { await playitCall("/api/playit/restart"); } catch (e) { toast(e.message, "err"); }
+    btn.disabled = false;
+    paintPlayitConsoleHead();
+  };
+  empty();
+  paintPlayitConsoleHead();
+}
+
+function paintPlayitConsoleHead() {
+  const el = $("#plc-status");
+  if (!el) return;
+  const pl = state.playit || {};
+  const dot = { online: "running", error: "crashed", starting: "starting" }[pl.agent] || "stopped";
+  el.innerHTML = `<span class="dot ${dot}"></span> Agent ${esc(PLAYIT_AGENT_LABEL[pl.agent] || pl.agent || "idle")}${pl.version ? ` · ${esc(pl.version)}` : ""}` +
+    (pl.agentError ? ` <span class="plc-err">— ${esc(pl.agentError)}</span>` : "");
+  const btn = $("#plc-restart");
+  if (btn) btn.hidden = !pl.linked;
 }
 
 boot();

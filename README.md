@@ -169,6 +169,10 @@ Details worth knowing:
   that is still a single self-contained executable; 1.x splits into a daemon, a
   service and a tray app, which a portable panel has no business installing.
   Bumping the pin re-downloads the agent and deletes the superseded one.
+- **Agent console.** Settings → playit.gg → **Agent console**, or click the
+  playit chip in the sidebar, shows the agent's output live. Errors and
+  warnings are red, and it has a **Restart agent** button. Your agent key is
+  blanked out if the agent ever prints it.
 - Deleting a server removes its tunnel from your playit account too. Unlinking
   only forgets the key here — tunnels stay on the account.
 - Nothing is installed system-wide: no service, no tray app, no daemon. The

@@ -6,6 +6,25 @@ the day the work landed.
 
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-10-02
+
+### Added
+
+- **A live playit agent console.** Settings → playit.gg → **Agent console**
+  (or click the playit chip in the sidebar) shows everything the playit agent
+  prints, as it prints it, alongside the panel's own playit messages. Errors
+  and warnings are red, **Hide routine output** cuts it down to just those,
+  and **Restart agent** gets a stuck agent going again, including one the
+  retry loop has given up on. Your agent key is blanked out if it ever shows
+  up in the output.
+
+### Changed
+
+- The panel used to throw away the agent's routine output and keep only its
+  last 200 error lines. It now keeps the last 1000 lines of everything. The
+  terminal window still only prints the panel's messages and agent errors, so
+  run.bat doesn't fill up with agent chatter.
+
 ## 2026-10-01
 
 ### Added

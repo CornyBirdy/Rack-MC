@@ -190,6 +190,13 @@ function attachConsoleStream(res, id) {
   sseSend(res, { type: "pings", id, pings: s.pings });
 }
 
+// playit agent console — replays the log, then live lines. Agent status rides
+// the global stream already, so this channel only relays playit's log.
+function attachPlayitConsole(res) {
+  sseChannel(res, () => {}, [[playit.events, "log", (entry) => sseSend(res, { type: "log", ...entry })]]);
+  for (const entry of playit.logLines()) sseSend(res, { type: "log", ...entry });
+}
+
 /* -------------------------------------------------------------------- routes */
 
 const server = http.createServer(async (req, res) => {
@@ -202,6 +209,7 @@ const server = http.createServer(async (req, res) => {
   if (p === "/api/events") return attachGlobalStream(res);
   if (parts[0] === "api" && parts[1] === "servers" && parts[3] === "console")
     return attachConsoleStream(res, parts[2]);
+  if (p === "/api/playit/console") return attachPlayitConsole(res);
 
   if (parts[0] === "api") {
     // ---- meta / bootstrap ----
@@ -340,6 +348,9 @@ const server = http.createServer(async (req, res) => {
 
     if (p === "/api/playit/refresh" && req.method === "POST")
       return guard(async () => sendJSON(res, 200, { playit: await playit.refresh() }))(req, res);
+
+    if (p === "/api/playit/restart" && req.method === "POST")
+      return guard(async () => sendJSON(res, 200, { playit: await playit.restartAgent() }))(req, res);
 
     // ---- settings ----
     if (p === "/api/settings" && req.method === "GET")
