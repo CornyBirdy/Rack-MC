@@ -6,6 +6,30 @@ the day the work landed.
 
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-10-03
+
+### Added
+
+- **Restart on crash.** A server that crashes is started again 10 seconds
+  later, with a countdown and a **Cancel** button on its page. It's on by
+  default and can be switched off per server in Settings. After 3 crashes
+  within 10 minutes the panel stops trying and leaves it down, so a broken mod
+  can't leave it restarting forever.
+- **Start with panel.** A per-server switch that starts the server when MC
+  Hoster starts, if it was running when the panel last went away. A server
+  you stopped yourself stays stopped. Several servers start 20 seconds apart.
+- **Restart on poor performance.** A per-server switch: if TPS stays below a
+  threshold for a set number of minutes, the server is restarted, with a
+  30-second warning in chat if anyone is on. It ignores the first 5 minutes
+  after a start and time spent paused, and gives up after 3 restarts in 3
+  hours.
+
+### Changed
+
+- Force-killing a server from the panel now leaves it **Stopped** rather than
+  **Crashed**, and the player log says it stopped. Closing the panel does the
+  same for the servers it shuts down.
+
 ## 2026-10-02
 
 ### Added

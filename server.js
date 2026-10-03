@@ -403,9 +403,20 @@ const server = http.createServer(async (req, res) => {
         const patch = {};
         for (const k of ["name", "memory", "port", "maxPlayers", "javaPath", "jvmArgs", "icon", "pauseWhenEmpty", "sleepAfter", "wakeOnJoin"])
           if (k in body) patch[k] = body[k];
+        if ("restartOnCrash" in body) patch.restartOnCrash = !!body.restartOnCrash;
+        if ("startWithPanel" in body) patch.startWithPanel = !!body.startWithPanel;
+        // TPS floor 0 is off; anything else is kept inside what TPS can be.
+        if ("lagRestartTps" in body) {
+          const t = Number(body.lagRestartTps) || 0;
+          patch.lagRestartTps = t > 0 ? Math.min(19, Math.max(1, t)) : 0;
+        }
+        if ("lagRestartMins" in body)
+          patch.lagRestartMins = Math.min(240, Math.max(1, Math.round(Number(body.lagRestartMins) || 10)));
         store.update(id, patch);
         if ("pauseWhenEmpty" in patch) manager.applyPauseProperty(id);
         if ("sleepAfter" in patch) manager.applySleepSetting(id);
+        if ("restartOnCrash" in patch || "lagRestartTps" in patch || "lagRestartMins" in patch)
+          manager.applyRestartSettings(id);
         if ("wakeOnJoin" in patch || "port" in patch || "name" in patch)
           manager.applyWakeSetting(id).catch(() => {});
         // The playit tunnel points at a fixed local port, so a port change has
@@ -417,11 +428,13 @@ const server = http.createServer(async (req, res) => {
       if (!action && req.method === "DELETE") return sendJSON(res, 200, manager.destroy(id));
 
       if (action === "start" && req.method === "POST")
-        return guard(async () => sendJSON(res, 200, await manager.start(id)))(req, res);
+        return guard(async () => sendJSON(res, 200, await manager.start(id, { manual: true })))(req, res);
       if (action === "stop" && req.method === "POST")
         return sendJSON(res, 200, manager.stop(id, { force: q.get("force") === "1" }));
       if (action === "restart" && req.method === "POST")
         return guard(async () => sendJSON(res, 200, await manager.restart(id)))(req, res);
+      if (action === "cancel-restart" && req.method === "POST")
+        return sendJSON(res, 200, manager.cancelRestart(id));
 
       if (action === "command" && req.method === "POST") {
         const body = await readJSONBody(req);
@@ -624,6 +637,7 @@ server.listen(PORT, () => {
   const url = `http://localhost:${PORT}`;
   console.log(`MC Hoster running at ${url}  (${store.all().length} server(s) configured)`);
   manager.initWake(); // stopped servers that want waking need their port held
+  manager.autostart().catch((e) => console.error("[autostart]", e && e.message));
   // Only auto-open a browser when launched standalone. Rack captures this
   // process's console and provides its own links, so never pop a window there.
   const supervised = process.env.RACK || process.env.MAC;
@@ -640,10 +654,7 @@ function shutdown() {
   playerlog.flushAll(); // history batched in memory would otherwise go with us
   manager.perf.flushAll(); // so the 24-hour charts survive a panel restart
   manager.closeWakeListeners().catch(() => {});
-  for (const s of store.all()) {
-    const rtSlot = manager.slot(s.id);
-    if (rtSlot.proc) manager.stop(s.id, { force: true });
-  }
+  manager.shutdownAll(); // no crash restarts, and "start with panel" remembers who was up
   setTimeout(() => process.exit(0), 600);
 }
 process.on("SIGINT", shutdown);

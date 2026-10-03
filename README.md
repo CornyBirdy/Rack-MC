@@ -205,7 +205,7 @@ Details worth knowing:
 - **Properties** — edit `server.properties` directly.
 - **Settings** — rename, change RAM/port/max-players, custom JVM args (Aikar's
   flags), Java override, the **public address** switch, the two **sleep**
-  switches, or delete the server.
+  switches, the three **auto-restart** switches, or delete the server.
 
 ## Server stats
 
@@ -350,6 +350,35 @@ so once and the listener stays out of the way.
 
 Pair it with deep sleep and an idle server costs nothing but still looks online
 to anyone who opens their server list.
+
+## Keeping a server up on its own
+
+Three switches in **Settings** for a server nobody is babysitting, such as one
+on an always-on PC.
+
+- **Restart on crash** (on by default): 10 seconds after a crash the panel
+  starts the server again. The server page shows the countdown with a
+  **Cancel** button. If it crashes 3 times within 10 minutes it stays down, so
+  a broken mod or a corrupt chunk can't leave it restarting forever. Press
+  Start once you've fixed it. Stopping it yourself, including a force kill,
+  never counts as a crash.
+- **Start with panel** (off by default): when MC Hoster starts, it starts
+  every server with this on that was running when the panel last went away.
+  A server you stopped yourself (or that went into deep sleep) stays stopped.
+  They start 20 seconds apart so a small machine isn't swamped. To get this
+  after a PC reboot, MC Hoster itself has to start on boot too, for example
+  with autostart switched on in Rack.
+- **Restart on poor performance** (off by default): if TPS stays below a
+  threshold (say 12) for a number of minutes (say 10), the panel restarts the
+  server. If players are online they get a 30-second warning in chat first,
+  and the banner on the server page has a **Cancel** button. The first 5
+  minutes after a start don't count, and neither does time spent paused. A
+  reading that goes missing in the middle of a low streak keeps the streak
+  going, since a badly lagging server can be too slow to answer. After 3
+  performance restarts in 3 hours it stops trying and leaves the server
+  running, because restarts aren't what that server needs. This needs a server
+  that reports TPS: Minecraft 1.20.3 or newer, or Paper, Purpur, Forge or
+  NeoForge on any version.
 
 ## System monitor
 

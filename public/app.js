@@ -1037,6 +1037,8 @@ async function renderServer(id) {
     if (!cur || state.route.id !== id) return clearInterval(renderServer._timer);
     const u = $("#t-uptime");
     if (u && cur.startedAt) u.textContent = fmtUptime(Date.now() - cur.startedAt);
+    const rs = $("#restart-secs");
+    if (rs && (cur.restartAt || cur.lagRestartAt)) rs.textContent = restartSecs(cur);
     if (state.activeTab === "stats") perfPaintSession(id);
   }, 1000);
 }
@@ -1063,6 +1065,19 @@ function renderEula(s) {
     slot.innerHTML = `<div class="banner warn"><span class="spinner"></span> Installing server files… watch the console below for progress.</div>`;
   } else if (s.status === "install-failed") {
     slot.innerHTML = `<div class="banner err">${ico("alert")} Installation failed. Check the console for details — you can delete this server in Settings and try again.</div>`;
+  } else if (s.restartAt || s.lagRestartAt) {
+    const crash = s.status === "crashed" && s.restartAt;
+    slot.innerHTML = `<div class="banner warn">
+      <span class="spinner"></span>
+      <div>${crash ? "The server crashed. Restarting automatically" : "TPS has stayed low. Restarting to recover"} in <b id="restart-secs">${restartSecs(s)}</b>s.</div>
+      <div class="b-actions"><button class="btn btn-sm" id="cancel-restart">Cancel</button></div>
+    </div>`;
+    $("#cancel-restart").onclick = async () => {
+      try { await API.post(`/api/servers/${s.id}/cancel-restart`); toast("Restart cancelled.", "ok"); }
+      catch (e) { toast(e.message, "err"); }
+    };
+  } else if (s.crashGaveUp) {
+    slot.innerHTML = `<div class="banner err">${ico("alert")} This server crashed 3 times in 10 minutes, so it won't be restarted again automatically. Check the console for the cause, then press Start.</div>`;
   } else if (!s.eula) {
     slot.innerHTML = `<div class="banner warn">
       <span>${ico("file")}</span>
@@ -1075,6 +1090,8 @@ function renderEula(s) {
     };
   } else slot.innerHTML = "";
 }
+
+const restartSecs = (s) => Math.max(0, Math.ceil(((s.restartAt || s.lagRestartAt) - Date.now()) / 1000));
 
 async function serverAction(id, act) {
   try {
@@ -3581,6 +3598,11 @@ async function renderSettingsTab(id) {
   const sleepOn = Number(def.sleepAfter) > 0;
   const sleepMins = sleepOn ? Number(def.sleepAfter) : 30;
   const wakeOn = !!def.wakeOnJoin;
+  const crashOn = def.restartOnCrash !== false;
+  const withPanel = !!def.startWithPanel;
+  const lagOn = Number(def.lagRestartTps) > 0;
+  const lagTps = lagOn ? Number(def.lagRestartTps) : 12;
+  const lagMins = Number(def.lagRestartMins) || 10;
   const body = $("#tab-body");
   body.innerHTML = `
     <div style="max-width:620px">
@@ -3634,6 +3656,36 @@ async function renderSettingsTab(id) {
         </div>
         <div class="hint">The player who knocks is asked to reconnect once it is up — nobody can join mid-boot, so a big modpack still means a couple of minutes in the queue. The port is only held while the server is stopped.</div>
       </div>
+      <div class="form-row">
+        <label>Restart on crash</label>
+        <div class="switch-row">
+          <label class="switch"><input type="checkbox" id="st-crash" ${crashOn ? "checked" : ""} /><i></i></label>
+          <div class="txt"><b>Start it again if it crashes</b><span>Restarts 10 seconds after a crash. Stopping it yourself never triggers this.</span></div>
+        </div>
+        <div class="hint">After 3 crashes within 10 minutes it stays down, so a broken mod can't leave it restarting forever. Press Start once you've fixed it.</div>
+      </div>
+      <div class="form-row">
+        <label>Start with panel</label>
+        <div class="switch-row">
+          <label class="switch"><input type="checkbox" id="st-withpanel" ${withPanel ? "checked" : ""} /><i></i></label>
+          <div class="txt"><b>Start this server when MC Hoster starts</b><span>Brings it back after a reboot or a panel restart, unless you'd stopped it yourself.</span></div>
+        </div>
+        <div class="hint">If several servers have this on, they start 20 seconds apart. For it to work after a PC reboot, MC Hoster itself also has to start on boot, for example with autostart on in Rack.</div>
+      </div>
+      <div class="form-row">
+        <label>Restart on poor performance</label>
+        <div class="switch-row">
+          <label class="switch"><input type="checkbox" id="st-lag" ${lagOn ? "checked" : ""} ${s && s.stats && s.stats.tpsSupport === "no" ? "disabled" : ""} /><i></i></label>
+          <div class="txt"><b>Restart when TPS stays below</b><span>Clears memory leaks and piled-up lag. Players get a 30-second warning in chat.</span></div>
+          <input type="number" id="st-lag-tps" min="1" max="19" step="1" value="${lagTps}" style="width:64px" ${lagOn ? "" : "disabled"} />
+          <span class="unit">TPS for</span>
+          <input type="number" id="st-lag-mins" min="1" max="240" step="1" value="${lagMins}" style="width:64px" ${lagOn ? "" : "disabled"} />
+          <span class="unit">min</span>
+        </div>
+        <div class="hint">${s && s.stats && s.stats.tpsSupport === "no"
+          ? "This server doesn't report its TPS (that needs Minecraft 1.20.3+, or Paper, Purpur, Forge or NeoForge), so there's nothing to watch."
+          : "20 TPS is full speed. The first 5 minutes after a start don't count, and neither does time spent paused. After 3 restarts in 3 hours it stops trying and leaves the server running."}</div>
+      </div>
       <div style="display:flex;gap:10px;margin-top:8px"><button class="btn btn-primary" id="st-save">Save changes</button></div>
 
       <div class="divider"></div>
@@ -3651,6 +3703,8 @@ async function renderSettingsTab(id) {
   const pauseSw = $("#st-pause"); pauseSw.onchange = () => ($("#st-pause-secs").disabled = !pauseSw.checked);
   const sleepSw = $("#st-sleep"); sleepSw.onchange = () => ($("#st-sleep-mins").disabled = !sleepSw.checked);
   const wakeSw = $("#st-wake");
+  const lagSw = $("#st-lag");
+  lagSw.onchange = () => ($("#st-lag-tps").disabled = $("#st-lag-mins").disabled = !lagSw.checked);
   renderServerPlayit(id);
   $("#st-save").onclick = async () => {
     try {
@@ -3661,6 +3715,10 @@ async function renderSettingsTab(id) {
         pauseWhenEmpty: pauseSw.checked ? Number($("#st-pause-secs").value) || 60 : 0,
         sleepAfter: sleepSw.checked ? Number($("#st-sleep-mins").value) || 30 : 0,
         wakeOnJoin: wakeSw.checked,
+        restartOnCrash: $("#st-crash").checked,
+        startWithPanel: $("#st-withpanel").checked,
+        lagRestartTps: lagSw.checked ? Number($("#st-lag-tps").value) || 12 : 0,
+        lagRestartMins: Number($("#st-lag-mins").value) || 10,
       });
       toast("Settings saved.", "ok");
       const fresh = await API.get(`/api/servers/${id}`); state.servers.set(id, fresh.server); renderServer(id);
