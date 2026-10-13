@@ -21,6 +21,7 @@ const sysmon = require("./lib/sysmon");
 const changelog = require("./lib/changelog");
 const modrinth = require("./lib/modrinth");
 const playerlog = require("./lib/playerlog");
+const backup = require("./lib/backup");
 
 // Port precedence: explicit flag, then the launcher's MC_PORT (our portEnv),
 // then whatever Rack/the old controller assigned, then the standalone default.
@@ -412,6 +413,9 @@ const server = http.createServer(async (req, res) => {
         }
         if ("lagRestartMins" in body)
           patch.lagRestartMins = Math.min(240, Math.max(1, Math.round(Number(body.lagRestartMins) || 10)));
+        if ("backupEvery" in body) patch.backupEvery = Math.max(0, Math.min(24 * 30, Number(body.backupEvery) || 0));
+        if ("backupKeep" in body) patch.backupKeep = Math.max(1, Math.min(200, Math.round(Number(body.backupKeep)) || 7));
+        if ("backupScope" in body) patch.backupScope = backup.SCOPES.includes(body.backupScope) ? body.backupScope : "world";
         store.update(id, patch);
         if ("pauseWhenEmpty" in patch) manager.applyPauseProperty(id);
         if ("sleepAfter" in patch) manager.applySleepSetting(id);
@@ -425,7 +429,13 @@ const server = http.createServer(async (req, res) => {
         manager.events.emit("event", { type: "status", ...manager.summary(id) });
         return sendJSON(res, 200, { server: manager.summary(id) });
       }
-      if (!action && req.method === "DELETE") return sendJSON(res, 200, manager.destroy(id));
+      if (!action && req.method === "DELETE") {
+        if (manager.slot(id).backup)
+          return sendJSON(res, 400, { error: "Wait for the running backup or restore to finish." });
+        const out = manager.destroy(id);
+        try { backup.forget(id); } catch (e) { console.error("[hoster] could not remove backups:", e.message); }
+        return sendJSON(res, 200, out);
+      }
 
       if (action === "start" && req.method === "POST")
         return guard(async () => sendJSON(res, 200, await manager.start(id, { manual: true })))(req, res);
@@ -444,7 +454,8 @@ const server = http.createServer(async (req, res) => {
         return guard(async () => {
           const body = await readJSONBody(req);
           const info = await playit.setEnabled(id, !!body.enabled, { tunnelId: body.tunnelId || null });
-          manager.events.emit("event", { type: "status", ...manager.summary(id) });
+          // Adopting a tunnel can take it off another server, so repaint them all.
+          for (const d of store.all()) manager.events.emit("event", { type: "status", ...manager.summary(d.id) });
           sendJSON(res, 200, { playit: info, server: manager.summary(id) });
         })(req, res);
 
@@ -551,6 +562,43 @@ const server = http.createServer(async (req, res) => {
         return guard(async () =>
           sendJSON(res, 200, { updates: await modrinth.updates(store.dirFor(id), def) })
         )(req, res);
+
+      // ---- backups ----
+      // GET    /api/servers/:id/backups                    list + schedule + running job
+      // POST   /api/servers/:id/backups {scope, note}      start one (progress on the event bus)
+      // GET    /api/servers/:id/backups/:file              download the zip
+      // POST   /api/servers/:id/backups/:file/restore {safety}
+      // DELETE /api/servers/:id/backups/:file
+      if (action === "backups") {
+        const file = parts[4] ? decodeURIComponent(parts[4]) : null;
+        if (!file && req.method === "GET") return guard(async () => sendJSON(res, 200, backup.list(id)))(req, res);
+        if (!file && req.method === "POST")
+          return guard(async () => {
+            const body = await readJSONBody(req);
+            backup.create(id, { scope: body.scope || "world", note: body.note || "" }).catch(() => {});
+            sendJSON(res, 200, { ok: true });
+          })(req, res);
+        if (file && !parts[5] && req.method === "GET")
+          return guard(async () => {
+            const { stream, size } = backup.openRead(id, file);
+            const label = `${def.name.replace(/[^\w.-]+/g, "_")}_${file}`;
+            res.writeHead(200, {
+              "Content-Type": "application/zip",
+              "Content-Length": size,
+              "Content-Disposition": `attachment; filename="${label}"`,
+            });
+            stream.pipe(res);
+            stream.on("error", () => res.destroy());
+          })(req, res);
+        if (file && parts[5] === "restore" && req.method === "POST")
+          return guard(async () => {
+            const body = await readJSONBody(req);
+            backup.restore(id, file, { safety: body.safety !== false }).catch(() => {});
+            sendJSON(res, 200, { ok: true });
+          })(req, res);
+        if (file && !parts[5] && req.method === "DELETE")
+          return guard(async () => sendJSON(res, 200, backup.remove(id, file)))(req, res);
+      }
 
       // file manager
       if (action === "files" && req.method === "GET")

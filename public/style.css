@@ -1039,3 +1039,15 @@ select { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmln
 .perf-disk-row .n .i { width: 13px; height: 13px; color: var(--muted-2); flex-shrink: 0; }
 .perf-disk-row .bar > i { display: block; height: 100%; background: var(--blue); border-radius: 2px; }
 .perf-disk-row .v { text-align: right; color: var(--muted); font-size: 11.5px; }
+
+/* Backups tab: make-a-backup bar, the list, and the per-row actions. */
+.bk-make { display: flex; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+.bk-make select { width: auto; }
+.bk-make input { flex: 1; min-width: 200px; }
+.bk-row .fname { cursor: default; min-width: 0; }
+.bk-row .fname .muted, .tn-pick .fname .muted { display: block; font-size: 11.5px; }
+.bk-acts { display: flex; align-items: center; gap: 6px; }
+
+/* Tunnel picker: rows are grouped under head rows, only .pick rows click. */
+.tn-pick .file-row.pick { cursor: pointer; }
+.tn-pick .file-row:not(.pick) .fname { cursor: default; }

@@ -330,6 +330,22 @@ async function handleGlobalEvent(e) {
   }
   // Player-log records arrive for every chat line; only the open Players tab
   // cares, and a sidebar redraw per message would be silly.
+  // Backup progress only matters to an open Backups tab; the finish is worth a
+  // toast wherever you are, unless the scheduler made it and it went fine.
+  if (e.type === "backup") {
+    const r = e.result;
+    if (r && (!r.ok || !r.auto)) {
+      const name = (state.servers.get(e.id) || {}).name || "Server";
+      toast(r.ok
+        ? `${name}: ${r.kind === "restore" ? "backup restored" : "backup saved"}.`
+        : `${name}: ${r.kind} failed — ${r.error}`, r.ok ? "ok" : "err");
+    }
+    if (state.route.name === "server" && state.route.id === e.id && state.activeTab === "backups") {
+      paintBackupJob(e.job);
+      if (r) loadBackups(e.id);
+    }
+    return;
+  }
   if (e.type === "playerlog") {
     if (state.route.name === "server" && state.route.id === e.id) patchServerLive(e);
     return;
@@ -1018,6 +1034,7 @@ async function renderServer(id) {
         <div class="tab" data-tab="players">Players</div>
         <div class="tab" data-tab="content">${esc(s.content ? s.content.noun : "Mods")}</div>
         <div class="tab" data-tab="files">Files</div>
+        <div class="tab" data-tab="backups">Backups</div>
         <div class="tab" data-tab="properties">Properties</div>
         <div class="tab" data-tab="settings">Settings</div>
       </div>
@@ -1101,7 +1118,7 @@ async function serverAction(id, act) {
 }
 
 /* ------------------------------------------------------------- tab switching */
-const TABS = ["console", "stats", "players", "content", "files", "properties", "settings"];
+const TABS = ["console", "stats", "players", "content", "files", "backups", "properties", "settings"];
 function selectTab(id, tab) {
   state.activeTab = tab;
   $$("#tabs .tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === tab));
@@ -1111,6 +1128,7 @@ function selectTab(id, tab) {
   else if (tab === "players") renderPlayersTab(id);
   else if (tab === "content") renderContentTab(id);
   else if (tab === "files") renderFilesTab(id);
+  else if (tab === "backups") renderBackupsTab(id);
   else if (tab === "properties") renderPropertiesTab(id);
   else if (tab === "settings") renderSettingsTab(id);
 }
@@ -2145,6 +2163,8 @@ function patchServerLive(e) {
     // The install finishing is what tells us which loader the server runs, so a
     // content tab that was showing "still installing" can now do its job.
     if (state.activeTab === "content" && s.content && !$("#md-list")) renderContentTab(s.id);
+    // Restore is only offered while stopped, so the rows follow the status.
+    if (state.activeTab === "backups" && bkData) paintBackups(s.id);
     if (perfOpen(s.id)) { perfPaintTiles(s.id); perfPaintSession(s.id); }
   }
   if (e.type === "stats") {
@@ -3185,6 +3205,176 @@ async function openFileEditor(id, path, name) {
   };
 }
 
+/* -------------------------------------------------------------- backups tab */
+/* A backup is a zip the panel keeps under data/backups. Making one while the
+ * server runs is safe — the backend pauses autosave and flushes first — so the
+ * button stays live for that. Restoring needs the server stopped. Progress
+ * arrives on the global event stream as "backup" events. */
+let bkData = null; // last /backups payload for the open server
+
+const BK_PHASE = {
+  starting: "Starting",
+  saving: "Saving the world to disk",
+  collecting: "Listing files",
+  zipping: "Compressing",
+  safety: "Backing up the current world first",
+  extracting: "Unpacking",
+  swapping: "Swapping the world in",
+};
+const BK_SCOPE = { world: "World", full: "Whole server" };
+
+async function renderBackupsTab(id) {
+  bkData = null;
+  $("#tab-body").innerHTML = `
+    <div class="bk-make">
+      <select id="bk-scope">
+        <option value="world">World only</option>
+        <option value="full">Whole server</option>
+      </select>
+      <input type="text" id="bk-note" maxlength="120" placeholder="Note (optional) — e.g. before updating mods" />
+      <button class="btn btn-primary" id="bk-go">${ico("archive")} Back up now</button>
+    </div>
+    <div class="fm-prog" id="bk-prog" hidden>
+      <div class="fm-prog-track"><i id="bk-prog-fill"></i></div>
+      <span class="fm-prog-text" id="bk-prog-text"></span>
+    </div>
+    <div id="bk-list"><div class="pk-empty">Loading…</div></div>
+    <p class="hint" style="margin-top:10px"><b>World only</b> is the world folder plus its Nether and End. <b>Whole server</b> adds mods, configs and jars too. Backing up a running server is safe — autosave is paused and the world flushed to disk first, and nobody gets kicked. Restoring needs the server stopped.</p>
+    <div class="section-title">Automatic backups</div>
+    <div id="bk-sched"></div>`;
+  $("#bk-go").onclick = async () => {
+    const btn = $("#bk-go");
+    btn.disabled = true;
+    try {
+      await API.post(`/api/servers/${id}/backups`, { scope: $("#bk-scope").value, note: $("#bk-note").value.trim() });
+      $("#bk-note").value = "";
+    } catch (e) {
+      toast(e.message, "err");
+      btn.disabled = false;
+    }
+  };
+  await loadBackups(id);
+}
+
+async function loadBackups(id) {
+  try {
+    bkData = await API.get(`/api/servers/${id}/backups`);
+  } catch (e) {
+    const box = $("#bk-list");
+    if (box) box.innerHTML = `<div class="banner err" style="margin:0">${esc(e.message)}</div>`;
+    return;
+  }
+  if (!$("#bk-list")) return; // tab changed while loading
+  const opt = $('#bk-scope option[value="world"]');
+  if (opt) opt.textContent = `World only (${bkData.level})`;
+  paintBackups(id);
+  paintBackupJob(bkData.job);
+  paintBackupSchedule(id);
+}
+
+function paintBackups(id) {
+  const box = $("#bk-list");
+  if (!box || !bkData) return;
+  const s = state.servers.get(id) || {};
+  const stopped = s.status === "stopped" || s.status === "crashed";
+  const busy = !!bkData.job;
+  const list = bkData.backups;
+
+  if (!list.length) {
+    box.innerHTML = `<div class="file-table"><div class="pk-empty">${bkData.hasWorld
+      ? "No backups yet."
+      : "No world yet — start the server once and there will be something to back up."}</div></div>`;
+    return;
+  }
+  box.innerHTML = `<div class="file-table">${list.map((b, i) => `
+    <div class="file-row bk-row">
+      <span class="fic">${ico("archive")}</span>
+      <span class="fname"><b>${esc(fmtWhen(b.created))}</b>${b.auto ? ` <span class="badge">auto</span>` : ""}
+        <span class="muted">${esc(BK_SCOPE[b.scope] || b.scope)} · ${fmtBytes(b.size)}${b.files ? ` · ${b.files.toLocaleString()} files` : ""}${b.mc ? ` · MC ${esc(b.mc)}` : ""}${b.note ? ` · ${esc(b.note)}` : ""}${
+          b.skipped && b.skipped.length ? ` · ${b.skipped.length} locked file(s) skipped` : ""}</span></span>
+      <div class="bk-acts">
+        <a class="btn btn-sm btn-ghost" href="/api/servers/${esc(id)}/backups/${encodeURIComponent(b.file)}" download title="Download the zip">${ico("download")}</a>
+        <button class="btn btn-sm" data-restore="${i}" ${stopped && !busy ? "" : "disabled"} title="${stopped ? "Restore this backup" : "Stop the server to restore"}">${ico("rotate")} Restore</button>
+        <span class="fdel" data-del="${i}" title="Delete">${ico("trash")}</span>
+      </div>
+    </div>`).join("")}</div>`;
+
+  $$("[data-restore]", box).forEach((el) => (el.onclick = () => restoreBackup(id, list[Number(el.dataset.restore)])));
+  $$("[data-del]", box).forEach((el) => (el.onclick = async () => {
+    const b = list[Number(el.dataset.del)];
+    if (!(await confirmDialog("Delete backup?", `<p>Delete the backup from <b>${esc(fmtWhen(b.created))}</b>? This can't be undone.</p>`, "Delete"))) return;
+    try { await API.del(`/api/servers/${id}/backups/${encodeURIComponent(b.file)}`); loadBackups(id); }
+    catch (e) { toast(e.message, "err"); }
+  }));
+}
+
+async function restoreBackup(id, b) {
+  let safety = true;
+  const asked = confirmDialog("Restore this backup?",
+    `<p>Replace ${b.scope === "full" ? "<b>everything</b> in this server's folder" : "this server's <b>world</b>"} with the backup from <b>${esc(fmtWhen(b.created))}</b>?</p>
+     <div class="switch-row" style="margin-top:12px">
+       <label class="switch"><input type="checkbox" id="bk-safety" checked /><i></i></label>
+       <div class="txt"><b>Back up what's there now first</b><span>So you can undo the restore if it wasn't the one you wanted.</span></div>
+     </div>`,
+    "Restore", true);
+  $("#bk-safety").onchange = (ev) => (safety = ev.target.checked);
+  if (!(await asked)) return;
+  try { await API.post(`/api/servers/${id}/backups/${encodeURIComponent(b.file)}/restore`, { safety }); }
+  catch (e) { toast(e.message, "err"); }
+}
+
+function paintBackupJob(job) {
+  if (bkData) bkData.job = job;
+  const prog = $("#bk-prog");
+  if (!prog) return;
+  const go = $("#bk-go");
+  if (go) go.disabled = !!job;
+  $$("#bk-list [data-restore]").forEach((b) => (b.disabled = !!job || b.title !== "Restore this backup"));
+  if (!job) { prog.hidden = true; return; }
+  prog.hidden = false;
+  const counted = job.total && (job.phase === "zipping" || job.phase === "extracting" || job.phase === "safety");
+  $("#bk-prog-fill").style.width = counted ? ((job.done / job.total) * 100).toFixed(1) + "%" : "4%";
+  $("#bk-prog-text").textContent = `${job.kind === "restore" ? "Restoring · " : ""}${BK_PHASE[job.phase] || job.phase}${
+    counted ? ` · ${job.done.toLocaleString()} of ${job.total.toLocaleString()} files` : "…"}`;
+}
+
+function paintBackupSchedule(id) {
+  const box = $("#bk-sched");
+  if (!box || !bkData) return;
+  const sch = bkData.schedule;
+  box.innerHTML = `
+    <div class="switch-row">
+      <label class="switch"><input type="checkbox" id="bk-auto" ${sch.every ? "checked" : ""} /><i></i></label>
+      <div class="txt"><b>Back up on a timer</b><span>Only while the server is running — a stopped world isn't changing.</span></div>
+      <span class="unit">every</span>
+      <input type="number" id="bk-every" min="1" max="720" value="${sch.every || 6}" style="width:68px" ${sch.every ? "" : "disabled"} />
+      <span class="unit">hours</span>
+    </div>
+    <div class="two-col" style="margin-top:14px">
+      <div class="form-row"><label>Keep the newest</label><input type="number" id="bk-keep" min="1" max="200" value="${sch.keep}" />
+        <div class="hint">automatic backups; older ones are deleted. Backups you make yourself are never deleted for you.</div></div>
+      <div class="form-row"><label>What to back up</label>
+        <select id="bk-auto-scope">
+          <option value="world" ${sch.scope === "world" ? "selected" : ""}>World only</option>
+          <option value="full" ${sch.scope === "full" ? "selected" : ""}>Whole server</option>
+        </select></div>
+    </div>
+    <button class="btn btn-primary" id="bk-save">Save schedule</button>`;
+  const sw = $("#bk-auto");
+  sw.onchange = () => ($("#bk-every").disabled = !sw.checked);
+  $("#bk-save").onclick = async () => {
+    try {
+      await API.patch(`/api/servers/${id}`, {
+        backupEvery: sw.checked ? Number($("#bk-every").value) || 6 : 0,
+        backupKeep: Number($("#bk-keep").value) || 7,
+        backupScope: $("#bk-auto-scope").value,
+      });
+      toast(sw.checked ? "Automatic backups on." : "Automatic backups off.", "ok");
+      loadBackups(id);
+    } catch (e) { toast(e.message, "err"); }
+  };
+}
+
 /* ------------------------------------------------------- properties tab */
 /* server.properties gets a real form. The file on disk stays the source of
  * truth: we parse it, draw one control per key, and write back only the keys
@@ -3727,7 +3917,7 @@ async function renderSettingsTab(id) {
   $("#st-delete").onclick = async () => {
     const pl = state.servers.get(id)?.playit;
     if (!(await confirmDialog("Delete server?",
-      `<p>Permanently delete <b>${esc(def.name)}</b> and every file it owns?</p>
+      `<p>Permanently delete <b>${esc(def.name)}</b>, every file it owns and all of its backups?</p>
        <p class="muted">Stop it first if it's running.${pl && pl.enabled ? " Its playit.gg tunnel is removed from your account too." : ""}</p>`,
       "Delete forever"))) return;
     try { await API.del(`/api/servers/${id}`); state.servers.delete(id); toast("Server deleted.", "ok"); go("#/"); }
@@ -3735,8 +3925,10 @@ async function renderSettingsTab(id) {
   };
 }
 
-// The per-server public-address switch. Flipping it on creates a Minecraft
-// tunnel on the linked playit.gg account and points it at this server's port.
+// The per-server public address. Off, it says whether there is an address to
+// come back to; on, it shows the address with "Change" and "Turn off" beside
+// it. Every way of picking an address goes through the same picker, so what a
+// button says is what happens.
 function renderServerPlayit(id) {
   const box = $("#st-playit");
   if (!box) return;
@@ -3758,54 +3950,87 @@ function renderServerPlayit(id) {
     return;
   }
 
-  const statusLine = !pl.enabled
-    ? "Off — players connect to localhost only."
-    : pl.address
-      ? (acct.agent === "online" ? "Live — anyone can join with this address." : "Address reserved; the tunnel connects when the agent is online.")
-      : "playit is allocating an address…";
+  if (!pl.enabled) {
+    box.innerHTML = `
+      <div class="switch-row">
+        <div class="txt"><b>Off</b><span>${pl.previous
+          ? `Only players on this machine or your network can join. Turning it on brings back <span class="mono">${esc(pl.previous)}</span>.`
+          : "Only players on this machine or your network can join."}</span></div>
+        ${pl.previous
+          ? `<button class="btn btn-sm btn-ghost" id="st-pl-pick">Different address…</button>
+             <button class="btn btn-sm btn-primary" id="st-pl-on">${ico("globe")} Turn on</button>`
+          : `<button class="btn btn-sm btn-primary" id="st-pl-pick">${ico("globe")} Choose an address…</button>`}
+      </div>`;
+    // No tunnel id means "the one this server had", which is what the button says.
+    if ($("#st-pl-on")) $("#st-pl-on").onclick = (ev) => applyPlayit(id, ev.currentTarget, { enabled: true, tunnelId: null });
+    $("#st-pl-pick").onclick = (ev) => choosePlayitAddress(id, ev.currentTarget);
+    return;
+  }
+
+  const statusLine = pl.address
+    ? (acct.agent === "online" ? "Live — anyone can join with this address." : "Address reserved; it goes live when the playit agent is online.")
+    : "playit is allocating an address…";
 
   box.innerHTML = `
     <div class="switch-row">
-      <label class="switch"><input type="checkbox" id="st-pl" ${pl.enabled ? "checked" : ""} /><i></i></label>
-      <div class="txt"><b>Public address via playit.gg</b><span>${esc(statusLine)}</span></div>
-      ${pl.enabled ? addrChipHTML(pl) : ""}
+      <div class="txt"><b>On</b><span>${esc(statusLine)}</span></div>
+      ${addrChipHTML(pl)}
     </div>
-    ${pl.enabled && pl.address && pl.port
-      ? `<div class="hint">Java clients find the port through an SRV record. If a client refuses the bare domain, use <span class="mono">${esc(pl.host)}:${pl.port}</span>.</div>`
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <button class="btn btn-sm" id="st-pl-pick">Change address…</button>
+      <button class="btn btn-sm btn-red" id="st-pl-off">Turn off</button>
+    </div>
+    ${pl.address && pl.port
+      ? `<div class="hint" style="margin-top:10px">Java clients find the port through an SRV record. If a client refuses the bare domain, use <span class="mono">${esc(pl.host)}:${pl.port}</span>.</div>`
       : ""}
     ${pl.disabled ? `<div class="banner warn" style="margin-top:12px">This tunnel is disabled at playit.gg — re-enable it there.</div>` : ""}`;
 
   bindAddrChips(box);
-  const sw = $("#st-pl");
-  if (!sw) return;
-  sw.onchange = async () => {
-    if (!sw.checked) return applyPlayit(id, sw, { enabled: false });
-    // Turning it on: offer the account's existing tunnels first, so an address
-    // friends already have can move here instead of a new one being minted.
-    sw.checked = false;
-    const pick = await pickTunnel(id);
-    if (!pick) return;
-    applyPlayit(id, sw, { enabled: true, tunnelId: pick === "new" ? null : pick });
+  $("#st-pl-pick").onclick = (ev) => choosePlayitAddress(id, ev.currentTarget);
+  $("#st-pl-off").onclick = async (ev) => {
+    const btn = ev.currentTarget;
+    if (!(await confirmDialog("Turn off the public address?",
+      `<p>Friends can't join with <b class="mono">${esc(pl.address || "this address")}</b> until you turn it back on.</p>
+       <p class="muted">The address stays reserved for this server — turning it on again brings the same one back.</p>`,
+      "Turn off"))) return;
+    applyPlayit(id, btn, { enabled: false });
   };
 }
 
-async function applyPlayit(id, sw, body) {
-  if (sw) sw.disabled = true;
+// Open the picker, confirm a move if the address belongs to another server,
+// then apply it.
+async function choosePlayitAddress(id, btn) {
+  const pick = await pickTunnel(id);
+  if (!pick) return;
+  if (pick !== "new" && pick.owner && pick.owner.id !== id) {
+    const live = pick.usedBy && pick.usedBy.id !== id;
+    if (!(await confirmDialog("Move this address?",
+      `<p><b class="mono">${esc(pick.address || pick.name)}</b> belongs to <b>${esc(pick.owner.name)}</b>.</p>
+       <p class="muted">${live
+         ? `Moving it here turns ${esc(pick.owner.name)}'s public address off. Anyone who joins with it will land on this server instead.`
+         : `${esc(pick.owner.name)} has its address switched off and will forget this one.`}</p>`,
+      "Move it here", false))) return;
+  }
+  applyPlayit(id, btn, { enabled: true, tunnelId: pick === "new" ? "new" : pick.id });
+}
+
+async function applyPlayit(id, btn, body) {
+  if (btn) { btn.disabled = true; btn.textContent = body.enabled ? "Working…" : "Turning off…"; }
   try {
     const out = await API.post(`/api/servers/${id}/playit`, body);
     state.servers.set(id, out.server);
-    toast(body.enabled ? "Public address enabled." : "Public address turned off.", "ok");
+    const addr = out.server.playit && out.server.playit.address;
+    toast(!body.enabled ? "Public address turned off." : addr ? "Public address: " + addr : "Public address on — playit is allocating it.", "ok");
   } catch (e) {
     toast(e.message, "err");
   }
-  if (sw) sw.disabled = false;
   renderServerPlayit(id);
-  const addr = $("#srv-addr");
-  if (addr) { addr.innerHTML = addrChipHTML((state.servers.get(id) || {}).playit); bindAddrChips(addr); }
+  const chip = $("#srv-addr");
+  if (chip) { chip.innerHTML = addrChipHTML((state.servers.get(id) || {}).playit); bindAddrChips(chip); }
 }
 
-// Resolves to a tunnel id, the string "new", or null if the user backed out.
-// Skips straight to "new" when the account has nothing worth adopting.
+// Every tunnel on the account, grouped by whose it is. Resolves to the picked
+// tunnel, the string "new", or null if the picker was closed.
 function pickTunnel(id) {
   return new Promise(async (resolve) => {
     let tunnels = [];
@@ -3815,35 +4040,47 @@ function pickTunnel(id) {
       toast(e.message, "err");
       return resolve(null);
     }
-    const free = tunnels.filter((t) => !t.usedBy);
-    if (!free.length) return resolve("new");
+    for (const t of tunnels) t.owner = t.usedBy || t.heldBy || null;
+    const best = (a, b) => (b.recommended ? 1 : 0) - (a.recommended ? 1 : 0);
+    const current = tunnels.filter((t) => t.usedBy && t.usedBy.id === id);
+    const previous = tunnels.filter((t) => t.heldBy && t.heldBy.id === id);
+    const free = tunnels.filter((t) => !t.owner).sort(best);
+    const taken = tunnels.filter((t) => t.owner && t.owner.id !== id).sort(best);
+
+    const kind = (t) => t.recommended
+      ? "Minecraft Java · players type just the address"
+      : `${t.type || t.portType || "tunnel"} · players need the port too`;
+    const row = (t, note, pickable = true) => `
+      <div class="file-row ${pickable ? "pick" : ""}" ${pickable ? `data-t="${esc(t.id)}"` : ""}>
+        <span class="fic">${ico("globe")}</span>
+        <span class="fname"><b class="${t.address ? "mono" : ""}">${esc(t.address || (t.status === "pending" ? "address pending" : "no address yet"))}</b>
+          <span class="muted">${esc(t.name)} · ${esc(kind(t))}${note ? " · " + note : ""}</span></span>
+        ${pickable ? "" : `<span class="badge">current</span>`}
+      </div>`;
+    const group = (label, rows) => rows ? `<div class="file-row file-head"><span class="fhead-label">${label}</span></div>${rows}` : "";
 
     modal(`
-      <div class="modal-head"><h2>Public address</h2><button class="modal-close">×</button></div>
+      <div class="modal-head"><h2>Choose a public address</h2><button class="modal-close">×</button></div>
       <div class="modal-body">
-        <p class="hint" style="margin-top:0">Point one of your existing playit.gg tunnels at this server — it keeps its address, and MC Hoster takes over forwarding it — or make a new one.</p>
-        <div class="file-table">
-          ${free.map((t) => `
-            <div class="file-row pick" data-t="${esc(t.id)}" style="cursor:pointer">
-              <span class="fic">${t.recommended ? ico("check") : ico("plug")}</span>
-              <span class="fname">${esc(t.name)}
-                <span class="muted" style="font-size:11.5px">${esc(t.address || (t.status === "pending" ? "address pending" : "no address"))}${t.agent ? " · on " + esc(t.agent) : ""}</span>
-              </span>
-              <span class="fsize">${esc(t.type || t.portType)}</span>
-            </div>`).join("")}
-          <div class="file-row pick" data-t="new" style="cursor:pointer">
-            <span class="fic">${ico("plus")}</span><span class="fname">Create a new Minecraft tunnel<span class="muted" style="font-size:11.5px">Fresh address, set up automatically</span></span>
-            <span class="fsize">minecraft-java</span>
-          </div>
+        <p class="hint" style="margin-top:0">Each address is a playit.gg tunnel on your account and points at one server at a time. Keep an address friends already have, or make a new one.</p>
+        <div class="file-table tn-pick">
+          ${group("This server", current.map((t) => row(t, "", false)).join("") + previous.map((t) => row(t, "its previous address")).join(""))}
+          ${group("Not in use", free.map((t) => row(t, "")).join(""))}
+          ${group("Other servers", taken.map((t) => row(t, t.usedBy ? `used by ${esc(t.owner.name)} — picking it moves it here` : `kept by ${esc(t.owner.name)} (off)`)).join(""))}
+          ${group("New", `
+            <div class="file-row pick" data-t="new">
+              <span class="fic">${ico("plus")}</span>
+              <span class="fname"><b>Create a new address</b><span class="muted">A fresh Minecraft Java tunnel, set up automatically. Takes a few seconds to get its address.</span></span>
+            </div>`)}
         </div>
-        <p class="hint">Tunnels already used by another server in this panel aren't listed.</p>
       </div>
       <div class="modal-foot"><span></span><button class="btn btn-ghost" data-x>Cancel</button></div>`, { wide: true });
 
     let done = false;
     const finish = (v) => { if (done) return; done = true; closeModal(); resolve(v); };
     $(".modal-close").onclick = $("[data-x]").onclick = () => finish(null);
-    $$(".file-row.pick").forEach((el) => (el.onclick = () => finish(el.dataset.t)));
+    $$(".tn-pick .file-row.pick").forEach((el) => (el.onclick = () =>
+      finish(el.dataset.t === "new" ? "new" : tunnels.find((t) => t.id === el.dataset.t))));
   });
 }
 
@@ -4015,7 +4252,7 @@ function renderPlayitSection() {
     </div>
     ${pl.agentError ? `<div class="banner err" style="margin:0 0 12px">${esc(pl.agentError)}</div>` : ""}
     ${accountNote ? `<div class="banner warn" style="margin:0 0 12px">${esc(accountNote)} <a href="https://playit.gg/account" target="_blank" rel="noopener" style="text-decoration:underline">Open playit.gg</a></div>` : ""}
-    <p class="hint" style="margin-top:0">Turn a public address on per server, in that server's <b>Settings</b> tab. Tunnels stay up while the panel runs.</p>
+    <p class="hint" style="margin-top:0">Give a server an address in its <b>Settings</b> tab, under <b>Public address</b> — pick one you already have, move one from another server, or make a new one. Tunnels stay up while the panel runs.</p>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn btn-sm" id="pl-console">${ico("terminal")} Agent console</button>
       <button class="btn btn-sm" id="pl-refresh">${ico("rotate")} Refresh tunnels</button>

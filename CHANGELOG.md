@@ -6,6 +6,47 @@ the day the work landed.
 
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-10-13
+
+### Added
+
+- **World backups.** A new **Backups** tab makes a zip of the world (the level
+  folder plus its Nether and End) or of the whole server, with an optional
+  note. Backing up a running server is safe and kicks nobody: autosave is
+  paused with `save-off`, the world flushed with `save-all flush`, and
+  autosave turned back on afterwards. Backups can be downloaded as ordinary
+  `.zip` files, deleted, or restored.
+- **Restore.** Only with the server stopped. The backup is unpacked into a
+  scratch folder and every file CRC-checked before anything is swapped in, so
+  a damaged zip leaves the current world alone. By default the world that's
+  there now is backed up first, so a restore can be undone. The server can't
+  be started — by hand or by wake-on-join — while a backup or restore is
+  running.
+- **Automatic backups.** Per server: every N hours while it is running,
+  keeping the newest N automatic backups. Backups you make yourself are never
+  pruned. Backups live in `data/backups/<server>/` and are deleted with the
+  server.
+
+### Fixed
+
+- **Choosing a public address.** The playit.gg picker was hard to follow and
+  did not always do what it said:
+  - Turning an address off didn't tell playit, so the tunnel kept forwarding
+    and friends could still join. It's now paused at playit.gg too.
+  - A server whose address was switched off kept its tunnel hidden from every
+    picker, its own included — so turning it back on, or giving that address
+    to a newer server, was impossible. The picker now lists every tunnel on
+    the account, grouped as *This server*, *Not in use*, *Other servers* and
+    *New*, and taking one from another server (after a confirmation) moves it.
+  - **Create a new address** quietly reused the server's old tunnel. It now
+    really creates one.
+  - New tunnels were named `MC Hoster · <server>`, and playit rejects the dot
+    (and emoji, accents) with `InvalidTunnelName`. Names are now plain ASCII,
+    such as `MC Hoster - Survival`.
+  - The Settings section is now explicit: **Off** with **Turn on** (bringing
+    back the previous address) and **Different address…**, or **On** with the
+    address, **Change address…** and **Turn off**.
+
 ## 2026-10-03
 
 ### Added
