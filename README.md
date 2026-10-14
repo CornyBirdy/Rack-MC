@@ -180,6 +180,63 @@ Details worth knowing:
 - playit publishes agent binaries for Windows and Linux only, so the feature
   hides itself on macOS.
 
+## Voice chat
+
+Each server has a **Voice chat** switch in **Settings**, built on
+[Simple Voice Chat](https://modrinth.com/plugin/simple-voice-chat). It is
+**off by default**, and the mod isn't installed until you turn it on.
+
+Simple Voice Chat doesn't use the game connection. It opens its own **UDP
+port**, and every player's mod connects to that port separately. That's why it
+needs some setup:
+
+1. **Install.** Turning the switch on installs Simple Voice Chat from Modrinth
+   into `mods/` (Fabric, Quilt, Forge, NeoForge) or `plugins/` (Paper,
+   Purpur), using a build for the server's exact Minecraft version, along
+   with anything it requires (Fabric API, for example). If it's already
+   there, it is configured instead. Vanilla can't load mods, so the switch is
+   unavailable on vanilla servers.
+2. **A port of its own.** Two servers on one machine can't share a voice
+   port, so each gets the first free one from **24454** (24454, 24455, …).
+   It's written as `port` in `config/voicechat/voicechat-server.properties`
+   (`plugins/voicechat/` on Paper and Purpur).
+3. **A playit.gg tunnel.** A Minecraft Java tunnel only carries TCP, so voice
+   traffic never reaches the server through it. While the server's
+   **public address** is on, voice chat gets a second, **UDP** playit tunnel
+   pointed at its port. Its address (like `abc.ply.gg:41234`) is written as
+   `voice_host`, which is what the server tells players' mods to connect to.
+   Players never type it.
+
+The voice tunnel follows the public address: with the address off, voice chat
+works for players on your network only, and its tunnel is paused.
+
+### Counting tunnels
+
+playit limits how many **ports** an account can have, and counts TCP and UDP
+separately. Each tunnel the panel makes is one port: a game address uses a
+**TCP** port, voice chat a **UDP** port. So voice chat doesn't eat into the
+ports your game addresses need, but each server with voice chat on takes one
+UDP port.
+
+- **Settings → Public access · playit.gg** shows both pools, such as
+  *TCP ports 2 of 4 used* and *UDP ports 4 of 4 used · full*, read from your
+  playit account.
+- A server's **Voice chat** section says how many UDP ports are left before
+  you turn it on, and warns when there are none.
+- **Turn on** checks with playit again first. If the account is full, it
+  explains and offers **Turn on for my network only** instead of asking
+  playit for a tunnel it can't have.
+- If playit makes the tunnel but then switches it off (over the port limit, or
+  because plain UDP tunnels need Premium on the account), the Voice chat
+  section shows why, with **Try again**.
+
+Players need Simple Voice Chat installed in their own game too, and press
+**V** in game to open its settings. The mod reads its config only at startup,
+so restart the server after turning voice chat on, or when its address changes
+(the console says when that happens). Turning voice chat off removes the mod
+if the switch installed it. A copy you installed by hand or that came with a
+modpack stays.
+
 ## Using the panel
 
 - **Create Server** — pick a loader, a Minecraft version, (a loader build for
@@ -204,8 +261,9 @@ Details worth knowing:
   text configs, make folders. Mods go in `mods/`, plugins in `plugins/`.
 - **Properties** — edit `server.properties` directly.
 - **Settings** — rename, change RAM/port/max-players, custom JVM args (Aikar's
-  flags), Java override, the **public address** switch, the two **sleep**
-  switches, the three **auto-restart** switches, or delete the server.
+  flags), Java override, the **public address** switch, **voice chat**, the
+  two **sleep** switches, the three **auto-restart** switches, or delete the
+  server.
 
 ## Server stats
 
@@ -408,6 +466,7 @@ MC_hoster/
 │  ├─ modrinth.js       Modrinth search/install, content manifest, .mrpack packs
 │  ├─ zip.js            read-only zip reader (zlib only) for .mrpack files
 │  ├─ playit.js         playit.gg agent, account link, per-server tunnels
+│  ├─ voicechat.js      Simple Voice Chat switch: install, voice port, config
 │  ├─ manager.js        server lifecycle, console, players
 │  ├─ perf.js           per-server TPS / CPU / memory / lag stats + history
 │  ├─ playerlog.js      durable per-server player history (sessions, chat…)

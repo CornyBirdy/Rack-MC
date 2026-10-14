@@ -326,6 +326,8 @@ async function handleGlobalEvent(e) {
     if ($("#playit-section")) renderPlayitSection();
     if ($("#plc-out")) paintPlayitConsoleHead();
     if (state.route.name === "server" && $("#st-playit")) renderServerPlayit(state.route.id);
+    // The account's UDP allowance rides this event and the voice section shows it.
+    if (state.route.name === "server" && $("#st-vc-on")) renderServerVoice(state.route.id);
     return;
   }
   // Player-log records arrive for every chat line; only the open Players tab
@@ -2160,6 +2162,7 @@ function patchServerLive(e) {
     const addr = $("#srv-addr");
     if (addr) { addr.innerHTML = addrChipHTML(s.playit); bindAddrChips(addr); }
     if ($("#st-playit")) renderServerPlayit(s.id);
+    if ($("#st-voice")) renderServerVoice(s.id);
     // The install finishing is what tells us which loader the server runs, so a
     // content tab that was showing "still installing" can now do its job.
     if (state.activeTab === "content" && s.content && !$("#md-list")) renderContentTab(s.id);
@@ -3883,6 +3886,10 @@ async function renderSettingsTab(id) {
       <div id="st-playit"></div>
 
       <div class="divider"></div>
+      <div class="section-title" style="margin-top:0">Voice chat</div>
+      <div id="st-voice" class="form-row"></div>
+
+      <div class="divider"></div>
       <div class="section-title" style="color:var(--red)">Danger zone</div>
       <div class="banner err" style="align-items:center">
         <div>Delete this server and all its files (world, mods, configs). This cannot be undone.</div>
@@ -3896,6 +3903,8 @@ async function renderSettingsTab(id) {
   const lagSw = $("#st-lag");
   lagSw.onchange = () => ($("#st-lag-tps").disabled = $("#st-lag-mins").disabled = !lagSw.checked);
   renderServerPlayit(id);
+  voiceDisk.set(id, data.voice || {});
+  renderServerVoice(id);
   $("#st-save").onclick = async () => {
     try {
       await API.patch(`/api/servers/${id}`, {
@@ -4084,6 +4093,136 @@ function pickTunnel(id) {
   });
 }
 
+/* -------------------------------------------------------------- voice chat */
+// Simple Voice Chat on a per-server switch. The live part (tunnel status, the
+// address) rides the status events; whether the mod is actually in mods/ is a
+// look at the disk, fetched with the Settings tab and after each switch.
+const voiceDisk = new Map();
+
+const VOICE_STATUS = {
+  local: "On for players on your network. Turn on the public address above and voice chat gets one too.",
+  pending: "playit is allocating a voice chat address…",
+  ready: "Address reserved; it goes live when the playit agent is online.",
+  online: "Live — players' voice chat connects to this address.",
+};
+
+function renderServerVoice(id) {
+  const box = $("#st-voice");
+  if (!box) return;
+  const v = { ...(voiceDisk.get(id) || {}), ...((state.servers.get(id) || {}).voice || {}) };
+
+  if (!v.supported) {
+    box.innerHTML = `<div class="hint">${esc(v.reason || "Voice chat isn't available for this server.")}</div>`;
+    return;
+  }
+
+  if (!v.enabled) {
+    box.innerHTML = `
+      <div class="switch-row">
+        <div class="txt"><b>Off</b><span>${v.installed
+          ? "Simple Voice Chat is already on this server. Turning this on gives it its own port and, with a public address, its own playit.gg tunnel."
+          : "Proximity voice chat with Simple Voice Chat. Turning it on installs the mod from Modrinth and sets it up for you."}</span></div>
+        <button class="btn btn-sm btn-primary" id="st-vc-on">${ico("mic")} Turn on</button>
+      </div>
+      ${voiceRoomHTML(id, v)}
+      <div class="hint" style="margin-top:10px">Voice chat doesn't go through the game's address: it uses its own UDP port, so with a public address on it needs a second playit.gg tunnel. Every player needs Simple Voice Chat installed in their own game too.</div>`;
+    $("#st-vc-on").onclick = (ev) => turnVoiceOn(id, ev.currentTarget, v);
+    return;
+  }
+
+  const line = v.status === "error" ? "The voice chat tunnel couldn't be set up." : VOICE_STATUS[v.status] || "";
+  const chip = v.address
+    ? `<span class="addr" data-copy="${esc(v.address)}" title="Voice chat address — click to copy">${ico("mic")} ${esc(v.address)} <span class="copy">${ico("copy")}</span></span>`
+    : v.status === "pending" ? `<span class="addr pending">${ico("mic")} allocating…</span>` : "";
+
+  box.innerHTML = `
+    <div class="switch-row">
+      <div class="txt"><b>On</b><span>${esc(line)}</span></div>
+      ${chip}
+    </div>
+    ${v.installed === false
+      ? `<div class="banner warn" style="margin:12px 0 0">Simple Voice Chat isn't on this server any more — it was removed from the mods or plugins folder.
+          <div class="b-actions"><button class="btn btn-sm" id="st-vc-fix">Reinstall</button></div></div>`
+      : ""}
+    ${v.error ? `<div class="banner err" style="margin:12px 0 0">${esc(v.error)}
+        <div class="b-actions"><button class="btn btn-sm" id="st-vc-retry">Try again</button></div></div>` : ""}
+    <div class="hint" style="margin-top:10px">
+      UDP port <span class="mono">${esc(String(v.port || "—"))}</span> on this machine${v.version ? ` · Simple Voice Chat ${esc(v.version)}` : ""}${v.manual ? " · installed by hand" : ""}.
+      ${v.address ? "Players don't type this address — the server hands it to their mod." : ""}
+      Every player needs Simple Voice Chat installed too, then presses <b>V</b> in game. The mod reads its settings at startup, so restart the server after changes.
+    </div>
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <button class="btn btn-sm btn-red" id="st-vc-off">Turn off</button>
+    </div>`;
+
+  bindAddrChips(box);
+  if ($("#st-vc-fix")) $("#st-vc-fix").onclick = (ev) => applyVoice(id, ev.currentTarget, true);
+  if ($("#st-vc-retry")) $("#st-vc-retry").onclick = (ev) => applyVoice(id, ev.currentTarget, true);
+  $("#st-vc-off").onclick = async (ev) => {
+    const btn = ev.currentTarget;
+    if (!(await confirmDialog("Turn off voice chat?",
+      `<p>${v.manual
+        ? "Simple Voice Chat was installed by hand, so it stays on the server, but it loses its public address."
+        : "Simple Voice Chat is removed from the server (if MC Hoster installed it) and its playit.gg tunnel is paused."}</p>
+       <p class="muted">Its settings are kept, so turning it on again brings the same port back.</p>`,
+      "Turn off"))) return;
+    applyVoice(id, btn, false);
+  };
+}
+
+// Whether this server's voice chat would get a public address: only with the
+// public address on, and only if the account has a UDP port to spare (or this
+// server already has a voice tunnel waiting from before).
+function voiceNeedsPort(id, v) {
+  const s = state.servers.get(id) || {};
+  return !!(state.playit && state.playit.linked && s.playit && s.playit.enabled && !v.hasTunnel);
+}
+
+function voiceRoomHTML(id, v) {
+  const udp = state.playit && state.playit.quota && state.playit.quota.udp;
+  if (!udp || !voiceNeedsPort(id, v)) return "";
+  if (udp.free <= 0)
+    return `<div class="banner warn" style="margin:12px 0 0">Your playit.gg account has no UDP ports left (${udp.used} of ${udp.allowed} in use), so voice chat would only work on your own network. Delete a UDP tunnel you don't use at <a href="https://playit.gg/account/tunnels" target="_blank" rel="noopener" style="text-decoration:underline">playit.gg</a> first.</div>`;
+  return `<div class="hint" style="margin-top:10px">Uses 1 of the ${udp.free} UDP port${udp.free === 1 ? "" : "s"} left on your playit.gg account (${udp.used} of ${udp.allowed} in use).</div>`;
+}
+
+// Read the allowance fresh before asking for a tunnel — somebody may have made
+// or deleted one at playit.gg since the page loaded — and say so plainly if
+// there's no room, instead of finding out from a tunnel that never comes up.
+async function turnVoiceOn(id, btn, v) {
+  if (voiceNeedsPort(id, v)) {
+    btn.disabled = true; btn.textContent = "Checking playit…";
+    let udp = null;
+    try {
+      const out = await API.get("/api/playit/quota");
+      if (out.playit) state.playit = out.playit;
+      udp = out.quota && out.quota.udp;
+    } catch {}
+    btn.disabled = false; btn.innerHTML = ico("mic") + " Turn on";
+    if (udp && udp.free <= 0) {
+      if (!(await confirmDialog("No UDP ports left on playit.gg",
+        `<p>Your playit.gg account is using <b>${udp.used} of ${udp.allowed}</b> UDP ports, so voice chat can't get a public address. Friends joining through playit won't be able to use it.</p>
+         <p class="muted">Delete a UDP tunnel you don't use at playit.gg/account/tunnels (or upgrade), then press Try again on this server. You can still turn it on now for players on your own network.</p>`,
+        "Turn on for my network only", false))) { renderServerVoice(id); return; }
+    }
+  }
+  applyVoice(id, btn, true);
+}
+
+async function applyVoice(id, btn, enabled) {
+  if (btn) { btn.disabled = true; btn.textContent = enabled ? "Setting up…" : "Turning off…"; }
+  try {
+    const out = await API.post(`/api/servers/${id}/voice`, { enabled });
+    state.servers.set(id, out.server);
+    voiceDisk.set(id, out.voice);
+    const tail = out.running ? " Restart the server to apply." : "";
+    toast((enabled ? "Voice chat is on." : "Voice chat is off.") + tail, "ok");
+  } catch (e) {
+    toast(e.message, "err");
+  }
+  renderServerVoice(id);
+}
+
 /* ---------------------------------------------------------------- settings */
 // What each Java major is for, shown in the Settings runtime picker.
 const JAVA_NOTE = { 25: "Minecraft 26.x", 21: "1.20.5 – 1.21.x", 17: "1.18 – 1.20.4", 8: "1.16 and older" };
@@ -4176,6 +4315,24 @@ function bindAddrChips(root = document) {
   $$("[data-copy]", root).forEach((el) => (el.onclick = (ev) => { ev.stopPropagation(); copyText(el.dataset.copy); }));
 }
 
+// The account's port allowance, one row per pool. playit counts ports, and
+// every tunnel the panel makes is one port: game addresses are TCP, voice
+// chat is UDP.
+function quotaRowsHTML(q) {
+  if (!q) return "";
+  const row = (label, what, p) => {
+    if (!p) return "";
+    const full = p.free <= 0;
+    return `
+      <div class="file-row" title="Each tunnel uses one port">
+        <span class="fic">${ico(what === "voice" ? "mic" : "globe")}</span>
+        <span class="fname">${label} <span class="muted">· ${what === "voice" ? "voice chat" : "game addresses"}</span></span>
+        <span class="fsize" style="${full ? "color:var(--red)" : ""}">${p.used} of ${p.allowed} used${full ? " · full" : ` · ${p.free} free`}</span>
+      </div>`;
+  };
+  return row("TCP ports", "game", q.tcp) + row("UDP ports", "voice", q.udp);
+}
+
 async function playitCall(path, body) {
   const out = await API.post(path, body);
   if (out.playit) state.playit = out.playit;
@@ -4249,6 +4406,7 @@ function renderPlayitSection() {
         <span class="fname">Agent ${esc(PLAYIT_AGENT_LABEL[pl.agent] || pl.agent)}${pl.tunnels ? ` · ${pl.tunnels} tunnel${pl.tunnels === 1 ? "" : "s"}` : " · no tunnels yet"}</span>
         <span class="fsize">${esc(pl.version)}</span>
       </div>
+      ${quotaRowsHTML(pl.quota)}
     </div>
     ${pl.agentError ? `<div class="banner err" style="margin:0 0 12px">${esc(pl.agentError)}</div>` : ""}
     ${accountNote ? `<div class="banner warn" style="margin:0 0 12px">${esc(accountNote)} <a href="https://playit.gg/account" target="_blank" rel="noopener" style="text-decoration:underline">Open playit.gg</a></div>` : ""}
