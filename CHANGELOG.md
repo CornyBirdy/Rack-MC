@@ -32,6 +32,13 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   voice chat on for your own network only, rather than asking playit for a
   tunnel it can't have. If playit switches a voice tunnel off (over the port
   limit, or because it needs Premium), the reason is shown.
+- **Use a tunnel made at playit.gg.** playit now refuses some tunnels the
+  panel creates itself (`TunnelTypeRequiresDescription`). The panel sends a
+  description with its request, and the Voice chat section has **Use a playit
+  tunnel…**: make a tunnel at playit.gg with the **Simple Voice Chat** type,
+  pick it, and the panel points it at the server's voice port and writes its
+  address into the mod's config. Picking another server's voice tunnel moves
+  it.
 - Turning voice chat off removes the mod again if the switch installed it,
   and pauses its tunnel. A copy installed by hand or by a modpack stays.
   Deleting a server deletes its voice tunnel too.

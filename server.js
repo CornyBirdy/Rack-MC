@@ -353,6 +353,10 @@ const server = http.createServer(async (req, res) => {
     if (p === "/api/playit/quota" && req.method === "GET")
       return guard(async () => sendJSON(res, 200, { quota: await playit.quota({ fresh: true }), playit: playit.snapshot() }))(req, res);
 
+    // UDP tunnels on the account that voice chat could use, for the picker.
+    if (p === "/api/playit/voice-tunnels" && req.method === "GET")
+      return guard(async () => sendJSON(res, 200, { tunnels: await playit.listVoiceTunnels(), playit: playit.snapshot() }))(req, res);
+
     if (p === "/api/playit/refresh" && req.method === "POST")
       return guard(async () => sendJSON(res, 200, { playit: await playit.refresh() }))(req, res);
 
@@ -473,6 +477,7 @@ const server = http.createServer(async (req, res) => {
           const body = await readJSONBody(req);
           const voice = await voicechat.setEnabled(id, !!body.enabled, {
             log: (line) => manager.emitInstall(id, line),
+            tunnelId: typeof body.tunnelId === "string" ? body.tunnelId : null,
           });
           // Pausing or making a tunnel can touch other servers' state too.
           for (const d of store.all()) manager.events.emit("event", { type: "status", ...manager.summary(d.id) });

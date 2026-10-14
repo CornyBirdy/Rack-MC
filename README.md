@@ -210,6 +210,20 @@ needs some setup:
 The voice tunnel follows the public address: with the address off, voice chat
 works for players on your network only, and its tunnel is paused.
 
+### If playit won't make the tunnel
+
+playit doesn't let apps create every kind of tunnel (it can answer
+`TunnelTypeRequiresDescription`). When that happens, make the tunnel yourself
+and let the panel set it up:
+
+1. At **playit.gg → Tunnels**, press **Add tunnel** and choose the **Simple
+   Voice Chat** type (plain UDP works too). The local port doesn't matter.
+2. In the server's **Voice chat** section, press **Use a playit tunnel…**,
+   then **Refresh**, and pick it.
+
+The panel points the tunnel at the server's voice port, hands it to its agent
+and writes the address into `voice_host`, exactly as with a tunnel it made.
+
 ### Counting tunnels
 
 playit limits how many **ports** an account can have, and counts TCP and UDP
