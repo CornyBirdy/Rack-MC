@@ -2160,6 +2160,7 @@ function patchServerLive(e) {
     const addr = $("#srv-addr");
     if (addr) { addr.innerHTML = addrChipHTML(s.playit); bindAddrChips(addr); }
     if ($("#st-playit")) renderServerPlayit(s.id);
+    if ($("#st-voice")) renderServerVoice(s.id);
     // The install finishing is what tells us which loader the server runs, so a
     // content tab that was showing "still installing" can now do its job.
     if (state.activeTab === "content" && s.content && !$("#md-list")) renderContentTab(s.id);
@@ -3883,6 +3884,10 @@ async function renderSettingsTab(id) {
       <div id="st-playit"></div>
 
       <div class="divider"></div>
+      <div class="section-title" style="margin-top:0">Voice chat</div>
+      <div id="st-voice" class="form-row"></div>
+
+      <div class="divider"></div>
       <div class="section-title" style="color:var(--red)">Danger zone</div>
       <div class="banner err" style="align-items:center">
         <div>Delete this server and all its files (world, mods, configs). This cannot be undone.</div>
@@ -3896,6 +3901,8 @@ async function renderSettingsTab(id) {
   const lagSw = $("#st-lag");
   lagSw.onchange = () => ($("#st-lag-tps").disabled = $("#st-lag-mins").disabled = !lagSw.checked);
   renderServerPlayit(id);
+  voiceDisk.set(id, data.voice || {});
+  renderServerVoice(id);
   $("#st-save").onclick = async () => {
     try {
       await API.patch(`/api/servers/${id}`, {
@@ -4082,6 +4089,96 @@ function pickTunnel(id) {
     $$(".tn-pick .file-row.pick").forEach((el) => (el.onclick = () =>
       finish(el.dataset.t === "new" ? "new" : tunnels.find((t) => t.id === el.dataset.t))));
   });
+}
+
+/* -------------------------------------------------------------- voice chat */
+// Simple Voice Chat on a per-server switch. The live part (tunnel status, the
+// address) rides the status events; whether the mod is actually in mods/ is a
+// look at the disk, fetched with the Settings tab and after each switch.
+const voiceDisk = new Map();
+
+const VOICE_STATUS = {
+  local: "On for players on your network. Turn on the public address above and voice chat gets one too.",
+  pending: "playit is allocating a voice chat address…",
+  ready: "Address reserved; it goes live when the playit agent is online.",
+  online: "Live — players' voice chat connects to this address.",
+};
+
+function renderServerVoice(id) {
+  const box = $("#st-voice");
+  if (!box) return;
+  const v = { ...(voiceDisk.get(id) || {}), ...((state.servers.get(id) || {}).voice || {}) };
+
+  if (!v.supported) {
+    box.innerHTML = `<div class="hint">${esc(v.reason || "Voice chat isn't available for this server.")}</div>`;
+    return;
+  }
+
+  if (!v.enabled) {
+    box.innerHTML = `
+      <div class="switch-row">
+        <div class="txt"><b>Off</b><span>${v.installed
+          ? "Simple Voice Chat is already on this server. Turning this on gives it its own port and, with a public address, its own playit.gg tunnel."
+          : "Proximity voice chat with Simple Voice Chat. Turning it on installs the mod from Modrinth and sets it up for you."}</span></div>
+        <button class="btn btn-sm btn-primary" id="st-vc-on">${ico("mic")} Turn on</button>
+      </div>
+      <div class="hint" style="margin-top:10px">Voice chat doesn't go through the game's address: it uses its own UDP port, so with a public address on it needs a second playit.gg tunnel. Free playit accounts only get a few tunnels. Every player needs Simple Voice Chat installed in their own game too.</div>`;
+    $("#st-vc-on").onclick = (ev) => applyVoice(id, ev.currentTarget, true);
+    return;
+  }
+
+  const line = v.status === "error" ? "The voice chat tunnel couldn't be set up." : VOICE_STATUS[v.status] || "";
+  const chip = v.address
+    ? `<span class="addr" data-copy="${esc(v.address)}" title="Voice chat address — click to copy">${ico("mic")} ${esc(v.address)} <span class="copy">${ico("copy")}</span></span>`
+    : v.status === "pending" ? `<span class="addr pending">${ico("mic")} allocating…</span>` : "";
+
+  box.innerHTML = `
+    <div class="switch-row">
+      <div class="txt"><b>On</b><span>${esc(line)}</span></div>
+      ${chip}
+    </div>
+    ${v.installed === false
+      ? `<div class="banner warn" style="margin:12px 0 0">Simple Voice Chat isn't on this server any more — it was removed from the mods or plugins folder.
+          <div class="b-actions"><button class="btn btn-sm" id="st-vc-fix">Reinstall</button></div></div>`
+      : ""}
+    ${v.error ? `<div class="banner err" style="margin:12px 0 0">${esc(v.error)}
+        <div class="b-actions"><button class="btn btn-sm" id="st-vc-retry">Try again</button></div></div>` : ""}
+    <div class="hint" style="margin-top:10px">
+      UDP port <span class="mono">${esc(String(v.port || "—"))}</span> on this machine${v.version ? ` · Simple Voice Chat ${esc(v.version)}` : ""}${v.manual ? " · installed by hand" : ""}.
+      ${v.address ? "Players don't type this address — the server hands it to their mod." : ""}
+      Every player needs Simple Voice Chat installed too, then presses <b>V</b> in game. The mod reads its settings at startup, so restart the server after changes.
+    </div>
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <button class="btn btn-sm btn-red" id="st-vc-off">Turn off</button>
+    </div>`;
+
+  bindAddrChips(box);
+  if ($("#st-vc-fix")) $("#st-vc-fix").onclick = (ev) => applyVoice(id, ev.currentTarget, true);
+  if ($("#st-vc-retry")) $("#st-vc-retry").onclick = (ev) => applyVoice(id, ev.currentTarget, true);
+  $("#st-vc-off").onclick = async (ev) => {
+    const btn = ev.currentTarget;
+    if (!(await confirmDialog("Turn off voice chat?",
+      `<p>${v.manual
+        ? "Simple Voice Chat was installed by hand, so it stays on the server, but it loses its public address."
+        : "Simple Voice Chat is removed from the server (if MC Hoster installed it) and its playit.gg tunnel is paused."}</p>
+       <p class="muted">Its settings are kept, so turning it on again brings the same port back.</p>`,
+      "Turn off"))) return;
+    applyVoice(id, btn, false);
+  };
+}
+
+async function applyVoice(id, btn, enabled) {
+  if (btn) { btn.disabled = true; btn.textContent = enabled ? "Setting up…" : "Turning off…"; }
+  try {
+    const out = await API.post(`/api/servers/${id}/voice`, { enabled });
+    state.servers.set(id, out.server);
+    voiceDisk.set(id, out.voice);
+    const tail = out.running ? " Restart the server to apply." : "";
+    toast((enabled ? "Voice chat is on." : "Voice chat is off.") + tail, "ok");
+  } catch (e) {
+    toast(e.message, "err");
+  }
+  renderServerVoice(id);
 }
 
 /* ---------------------------------------------------------------- settings */

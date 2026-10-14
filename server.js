@@ -22,6 +22,7 @@ const changelog = require("./lib/changelog");
 const modrinth = require("./lib/modrinth");
 const playerlog = require("./lib/playerlog");
 const backup = require("./lib/backup");
+const voicechat = require("./lib/voicechat");
 
 // Port precedence: explicit flag, then the launcher's MC_PORT (our portEnv),
 // then whatever Rack/the old controller assigned, then the standalone default.
@@ -396,6 +397,7 @@ const server = http.createServer(async (req, res) => {
           server: manager.summary(id),
           def,
           pauseSupported: manager.supportsPause(def.mc),
+          voice: voicechat.info(def, { deep: true }),
           installLog: s.install.log,
         });
       }
@@ -457,6 +459,20 @@ const server = http.createServer(async (req, res) => {
           // Adopting a tunnel can take it off another server, so repaint them all.
           for (const d of store.all()) manager.events.emit("event", { type: "status", ...manager.summary(d.id) });
           sendJSON(res, 200, { playit: info, server: manager.summary(id) });
+        })(req, res);
+
+      // POST /api/servers/:id/voice {enabled} — Simple Voice Chat on or off.
+      // Installing the mod streams its progress like a Mods-tab install does.
+      if (action === "voice" && req.method === "POST")
+        return guard(async () => {
+          const body = await readJSONBody(req);
+          const voice = await voicechat.setEnabled(id, !!body.enabled, {
+            log: (line) => manager.emitInstall(id, line),
+          });
+          // Pausing or making a tunnel can touch other servers' state too.
+          for (const d of store.all()) manager.events.emit("event", { type: "status", ...manager.summary(d.id) });
+          const status = manager.slot(id).status;
+          sendJSON(res, 200, { voice, server: manager.summary(id), running: status === "running" || status === "starting" });
         })(req, res);
 
       if (action === "eula" && req.method === "POST") {

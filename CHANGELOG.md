@@ -6,6 +6,29 @@ the day the work landed.
 
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-10-14
+
+### Added
+
+- **Voice chat.** A per-server **Voice chat** switch in Settings sets up
+  [Simple Voice Chat](https://modrinth.com/plugin/simple-voice-chat). It is off
+  by default and nothing is installed until you turn it on. Turning it on
+  installs the mod (Fabric, Quilt, Forge, NeoForge) or plugin (Paper, Purpur)
+  from Modrinth for the server's exact Minecraft version, gives the server its
+  own UDP port (24454, then 24455 for the next server, and so on) and writes
+  that port into `voicechat-server.properties`.
+- **Voice chat through playit.gg.** Simple Voice Chat uses its own UDP port,
+  which a Minecraft Java tunnel doesn't carry, so voice chat never connected
+  for friends joining through playit. While a server's public address is on,
+  voice chat now gets a second, UDP-only playit tunnel, and its address is
+  written into the mod's `voice_host` setting so players' mods connect to it.
+  Turning the public address off pauses the voice tunnel too. If playit won't
+  make another tunnel (free accounts only get a few), the Settings tab says
+  so.
+- Turning voice chat off removes the mod again if the switch installed it,
+  and pauses its tunnel. A copy installed by hand or by a modpack stays.
+  Deleting a server deletes its voice tunnel too.
+
 ## 2026-10-13
 
 ### Added
