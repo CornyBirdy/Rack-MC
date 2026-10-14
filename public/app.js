@@ -4152,10 +4152,12 @@ function renderServerVoice(id) {
       Every player needs Simple Voice Chat installed too, then presses <b>V</b> in game. The mod reads its settings at startup, so restart the server after changes.
     </div>
     <div style="display:flex;gap:8px;margin-top:10px">
+      ${voiceCanTunnel(id) ? `<button class="btn btn-sm${v.error ? " btn-primary" : ""}" id="st-vc-pick">${ico("globe")} Use a playit tunnel…</button>` : ""}
       <button class="btn btn-sm btn-red" id="st-vc-off">Turn off</button>
     </div>`;
 
   bindAddrChips(box);
+  if ($("#st-vc-pick")) $("#st-vc-pick").onclick = (ev) => pickVoiceTunnel(id, ev.currentTarget, v);
   if ($("#st-vc-fix")) $("#st-vc-fix").onclick = (ev) => applyVoice(id, ev.currentTarget, true);
   if ($("#st-vc-retry")) $("#st-vc-retry").onclick = (ev) => applyVoice(id, ev.currentTarget, true);
   $("#st-vc-off").onclick = async (ev) => {
@@ -4209,10 +4211,68 @@ async function turnVoiceOn(id, btn, v) {
   applyVoice(id, btn, true);
 }
 
-async function applyVoice(id, btn, enabled) {
+// A voice tunnel only makes sense while the game itself has a public address.
+function voiceCanTunnel(id) {
+  const s = state.servers.get(id) || {};
+  return !!(state.playit && state.playit.linked && s.playit && s.playit.enabled);
+}
+
+// Pick a tunnel made at playit.gg for this server's voice chat. playit won't
+// always let the panel create one itself, but its own site has a Simple Voice
+// Chat tunnel type that free accounts can make; the panel then points it at
+// the right port and writes its address into the mod's config.
+function pickVoiceTunnel(id, btn, v) {
+  modal(`
+    <div class="modal-head"><h2>Use a playit tunnel for voice chat</h2><button class="modal-close">×</button></div>
+    <div class="modal-body">
+      <ol class="hint" style="margin:0 0 12px;padding-left:18px;line-height:1.7">
+        <li>At <a href="https://playit.gg/account/tunnels" target="_blank" rel="noopener" style="text-decoration:underline">playit.gg → Tunnels</a>, press <b>Add tunnel</b>.</li>
+        <li>Choose the <b>Simple Voice Chat</b> tunnel type (plain <b>UDP</b> works too). Local address and port don't matter — MC Hoster points it at port <span class="mono">${esc(String(v.port || 24454))}</span> for you.</li>
+        <li>Come back here, press <b>Refresh</b>, and pick it.</li>
+      </ol>
+      <div class="file-table tn-pick" id="vt-list"><div class="file-row"><span class="fname muted">Loading tunnels…</span></div></div>
+    </div>
+    <div class="modal-foot"><button class="btn btn-sm" id="vt-refresh">${ico("rotate")} Refresh</button><button class="btn btn-ghost" data-x>Cancel</button></div>`, { wide: true });
+  $(".modal-close").onclick = $("[data-x]").onclick = () => closeModal();
+
+  const load = async () => {
+    const list = $("#vt-list");
+    if (!list) return;
+    list.innerHTML = `<div class="file-row"><span class="fname muted">Loading tunnels…</span></div>`;
+    let tunnels = [];
+    try { tunnels = (await API.get("/api/playit/voice-tunnels")).tunnels; }
+    catch (e) { list.innerHTML = `<div class="file-row"><span class="fname" style="color:var(--red)">${esc(e.message)}</span></div>`; return; }
+    if (!tunnels.length) {
+      list.innerHTML = `<div class="file-row"><span class="fname muted">No UDP tunnels on your playit account yet — make one at playit.gg, then press Refresh.</span></div>`;
+      return;
+    }
+    const BLOCK = { "over-port-limit": "switched off: account over its port limit", "requires-premium": "switched off: needs Premium" };
+    list.innerHTML = tunnels.map((t) => {
+      const mine = t.voiceBy && t.voiceBy.id === id;
+      const note = mine ? "this server's voice tunnel"
+        : t.voiceBy ? `voice chat for ${esc(t.voiceBy.name)} — picking it moves it here`
+        : t.blocked ? esc(BLOCK[t.blocked] || "switched off at playit.gg") : "";
+      return `
+        <div class="file-row ${mine ? "" : "pick"}" ${mine ? "" : `data-t="${esc(t.id)}"`}>
+          <span class="fic">${ico("mic")}</span>
+          <span class="fname"><b class="${t.address ? "mono" : ""}">${esc(t.address || (t.status === "pending" ? "address pending" : "no address yet"))}</b>
+            <span class="muted">${esc(t.name)} · ${esc(t.type || t.portType)}${note ? " · " + note : ""}</span></span>
+          ${mine ? `<span class="badge">current</span>` : ""}
+        </div>`;
+    }).join("");
+    $$("#vt-list .file-row.pick").forEach((el) => (el.onclick = () => {
+      closeModal();
+      applyVoice(id, btn, true, { tunnelId: el.dataset.t });
+    }));
+  };
+  $("#vt-refresh").onclick = load;
+  load();
+}
+
+async function applyVoice(id, btn, enabled, extra = {}) {
   if (btn) { btn.disabled = true; btn.textContent = enabled ? "Setting up…" : "Turning off…"; }
   try {
-    const out = await API.post(`/api/servers/${id}/voice`, { enabled });
+    const out = await API.post(`/api/servers/${id}/voice`, { enabled, ...extra });
     state.servers.set(id, out.server);
     voiceDisk.set(id, out.voice);
     const tail = out.running ? " Restart the server to apply." : "";
