@@ -348,6 +348,11 @@ const server = http.createServer(async (req, res) => {
     if (p === "/api/playit/tunnels" && req.method === "GET")
       return guard(async () => sendJSON(res, 200, { tunnels: await playit.listAccountTunnels() }))(req, res);
 
+    // The account's TCP/UDP port allowance, read fresh — asked just before
+    // anything that would need another tunnel, so the answer is current.
+    if (p === "/api/playit/quota" && req.method === "GET")
+      return guard(async () => sendJSON(res, 200, { quota: await playit.quota({ fresh: true }), playit: playit.snapshot() }))(req, res);
+
     if (p === "/api/playit/refresh" && req.method === "POST")
       return guard(async () => sendJSON(res, 200, { playit: await playit.refresh() }))(req, res);
 

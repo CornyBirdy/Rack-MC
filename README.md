@@ -208,10 +208,27 @@ needs some setup:
    Players never type it.
 
 The voice tunnel follows the public address: with the address off, voice chat
-works for players on your network only, and its tunnel is paused. Every voice
-chat server uses one more tunnel on your playit account, so two servers with
-voice chat use four tunnels in total. Free accounts only get a few tunnels. If
-playit refuses to make one, the Settings tab says so, with **Try again**.
+works for players on your network only, and its tunnel is paused.
+
+### Counting tunnels
+
+playit limits how many **ports** an account can have, and counts TCP and UDP
+separately. Each tunnel the panel makes is one port: a game address uses a
+**TCP** port, voice chat a **UDP** port. So voice chat doesn't eat into the
+ports your game addresses need, but each server with voice chat on takes one
+UDP port.
+
+- **Settings → Public access · playit.gg** shows both pools, such as
+  *TCP ports 2 of 4 used* and *UDP ports 4 of 4 used · full*, read from your
+  playit account.
+- A server's **Voice chat** section says how many UDP ports are left before
+  you turn it on, and warns when there are none.
+- **Turn on** checks with playit again first. If the account is full, it
+  explains and offers **Turn on for my network only** instead of asking
+  playit for a tunnel it can't have.
+- If playit makes the tunnel but then switches it off (over the port limit, or
+  because plain UDP tunnels need Premium on the account), the Voice chat
+  section shows why, with **Try again**.
 
 Players need Simple Voice Chat installed in their own game too, and press
 **V** in game to open its settings. The mod reads its config only at startup,

@@ -326,6 +326,8 @@ async function handleGlobalEvent(e) {
     if ($("#playit-section")) renderPlayitSection();
     if ($("#plc-out")) paintPlayitConsoleHead();
     if (state.route.name === "server" && $("#st-playit")) renderServerPlayit(state.route.id);
+    // The account's UDP allowance rides this event and the voice section shows it.
+    if (state.route.name === "server" && $("#st-vc-on")) renderServerVoice(state.route.id);
     return;
   }
   // Player-log records arrive for every chat line; only the open Players tab
@@ -4122,8 +4124,9 @@ function renderServerVoice(id) {
           : "Proximity voice chat with Simple Voice Chat. Turning it on installs the mod from Modrinth and sets it up for you."}</span></div>
         <button class="btn btn-sm btn-primary" id="st-vc-on">${ico("mic")} Turn on</button>
       </div>
-      <div class="hint" style="margin-top:10px">Voice chat doesn't go through the game's address: it uses its own UDP port, so with a public address on it needs a second playit.gg tunnel. Free playit accounts only get a few tunnels. Every player needs Simple Voice Chat installed in their own game too.</div>`;
-    $("#st-vc-on").onclick = (ev) => applyVoice(id, ev.currentTarget, true);
+      ${voiceRoomHTML(id, v)}
+      <div class="hint" style="margin-top:10px">Voice chat doesn't go through the game's address: it uses its own UDP port, so with a public address on it needs a second playit.gg tunnel. Every player needs Simple Voice Chat installed in their own game too.</div>`;
+    $("#st-vc-on").onclick = (ev) => turnVoiceOn(id, ev.currentTarget, v);
     return;
   }
 
@@ -4165,6 +4168,45 @@ function renderServerVoice(id) {
       "Turn off"))) return;
     applyVoice(id, btn, false);
   };
+}
+
+// Whether this server's voice chat would get a public address: only with the
+// public address on, and only if the account has a UDP port to spare (or this
+// server already has a voice tunnel waiting from before).
+function voiceNeedsPort(id, v) {
+  const s = state.servers.get(id) || {};
+  return !!(state.playit && state.playit.linked && s.playit && s.playit.enabled && !v.hasTunnel);
+}
+
+function voiceRoomHTML(id, v) {
+  const udp = state.playit && state.playit.quota && state.playit.quota.udp;
+  if (!udp || !voiceNeedsPort(id, v)) return "";
+  if (udp.free <= 0)
+    return `<div class="banner warn" style="margin:12px 0 0">Your playit.gg account has no UDP ports left (${udp.used} of ${udp.allowed} in use), so voice chat would only work on your own network. Delete a UDP tunnel you don't use at <a href="https://playit.gg/account/tunnels" target="_blank" rel="noopener" style="text-decoration:underline">playit.gg</a> first.</div>`;
+  return `<div class="hint" style="margin-top:10px">Uses 1 of the ${udp.free} UDP port${udp.free === 1 ? "" : "s"} left on your playit.gg account (${udp.used} of ${udp.allowed} in use).</div>`;
+}
+
+// Read the allowance fresh before asking for a tunnel — somebody may have made
+// or deleted one at playit.gg since the page loaded — and say so plainly if
+// there's no room, instead of finding out from a tunnel that never comes up.
+async function turnVoiceOn(id, btn, v) {
+  if (voiceNeedsPort(id, v)) {
+    btn.disabled = true; btn.textContent = "Checking playit…";
+    let udp = null;
+    try {
+      const out = await API.get("/api/playit/quota");
+      if (out.playit) state.playit = out.playit;
+      udp = out.quota && out.quota.udp;
+    } catch {}
+    btn.disabled = false; btn.innerHTML = ico("mic") + " Turn on";
+    if (udp && udp.free <= 0) {
+      if (!(await confirmDialog("No UDP ports left on playit.gg",
+        `<p>Your playit.gg account is using <b>${udp.used} of ${udp.allowed}</b> UDP ports, so voice chat can't get a public address. Friends joining through playit won't be able to use it.</p>
+         <p class="muted">Delete a UDP tunnel you don't use at playit.gg/account/tunnels (or upgrade), then press Try again on this server. You can still turn it on now for players on your own network.</p>`,
+        "Turn on for my network only", false))) { renderServerVoice(id); return; }
+    }
+  }
+  applyVoice(id, btn, true);
 }
 
 async function applyVoice(id, btn, enabled) {
@@ -4273,6 +4315,24 @@ function bindAddrChips(root = document) {
   $$("[data-copy]", root).forEach((el) => (el.onclick = (ev) => { ev.stopPropagation(); copyText(el.dataset.copy); }));
 }
 
+// The account's port allowance, one row per pool. playit counts ports, and
+// every tunnel the panel makes is one port: game addresses are TCP, voice
+// chat is UDP.
+function quotaRowsHTML(q) {
+  if (!q) return "";
+  const row = (label, what, p) => {
+    if (!p) return "";
+    const full = p.free <= 0;
+    return `
+      <div class="file-row" title="Each tunnel uses one port">
+        <span class="fic">${ico(what === "voice" ? "mic" : "globe")}</span>
+        <span class="fname">${label} <span class="muted">· ${what === "voice" ? "voice chat" : "game addresses"}</span></span>
+        <span class="fsize" style="${full ? "color:var(--red)" : ""}">${p.used} of ${p.allowed} used${full ? " · full" : ` · ${p.free} free`}</span>
+      </div>`;
+  };
+  return row("TCP ports", "game", q.tcp) + row("UDP ports", "voice", q.udp);
+}
+
 async function playitCall(path, body) {
   const out = await API.post(path, body);
   if (out.playit) state.playit = out.playit;
@@ -4346,6 +4406,7 @@ function renderPlayitSection() {
         <span class="fname">Agent ${esc(PLAYIT_AGENT_LABEL[pl.agent] || pl.agent)}${pl.tunnels ? ` · ${pl.tunnels} tunnel${pl.tunnels === 1 ? "" : "s"}` : " · no tunnels yet"}</span>
         <span class="fsize">${esc(pl.version)}</span>
       </div>
+      ${quotaRowsHTML(pl.quota)}
     </div>
     ${pl.agentError ? `<div class="banner err" style="margin:0 0 12px">${esc(pl.agentError)}</div>` : ""}
     ${accountNote ? `<div class="banner warn" style="margin:0 0 12px">${esc(accountNote)} <a href="https://playit.gg/account" target="_blank" rel="noopener" style="text-decoration:underline">Open playit.gg</a></div>` : ""}
