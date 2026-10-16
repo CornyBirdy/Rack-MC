@@ -32,6 +32,7 @@ const state = {
   settings: {},
   defaults: { quickCommands: [] }, // stock values the backend ships, for "reset"
   build: null, // { version, commit } — what this checkout is
+  lan: [], // addresses a phone on the same network can open the panel at
   playit: { supported: false, linked: false, agent: "stopped" },
   sys: null, // latest host resource sample (see sysmon.js)
   servers: new Map(), // id -> summary
@@ -82,6 +83,13 @@ function fmtAgo(t) {
   if (s < 86400) return Math.floor(s / 3600) + "h ago";
   const d = Math.floor(s / 86400);
   return d < 30 ? d + "d ago" : new Date(t).toLocaleDateString();
+}
+// "in 4 min" — for something scheduled.
+function fmtIn(t) {
+  const d = Math.max(0, t - Date.now());
+  if (d < 60000) return "in under a minute";
+  if (d < 3600000) return `in ${Math.round(d / 60000)} min`;
+  return `in ${Math.round(d / 3600000)} h`;
 }
 // Per-server avatar: the emoji from Settings if there is one, else an initial.
 function srvIcon(s) { return s && s.icon ? esc(s.icon) : initialTile(s && s.name); }
@@ -283,6 +291,7 @@ async function boot() {
     state.settings = b.settings;
     state.defaults = b.defaults || state.defaults;
     state.build = b.build || null;
+    state.lan = b.lan || [];
     state.playit = b.playit || state.playit;
     state.sys = b.sys || null;
     b.servers.forEach((s) => state.servers.set(s.id, s));
@@ -297,8 +306,25 @@ async function boot() {
   window.addEventListener("hashchange", route);
   route();
 
-  $("#nav-create").onclick = openCreateWizard;
-  $("#nav-settings").onclick = openSettings;
+  $("#nav-create").onclick = () => { closeNav(); openCreateWizard(); };
+  $("#nav-settings").onclick = () => { closeNav(); openSettings(); };
+  // Phones: the sidebar is a drawer behind the top bar's menu button.
+  $("#tb-menu").onclick = () => document.body.classList.toggle("nav-open");
+  $("#scrim").onclick = closeNav;
+  $(".sidebar .nav-item[data-route]").addEventListener("click", closeNav);
+}
+
+function closeNav() { document.body.classList.remove("nav-open"); }
+
+// The phone top bar: where you are, and how many servers are up.
+function paintTopbar() {
+  const t = $("#tb-title"), sum = $("#tb-sum");
+  if (!t) return;
+  const s = state.route.name === "server" ? state.servers.get(state.route.id) : null;
+  t.innerHTML = s ? `<span class="dot ${viewStatus(s)}"></span>${esc(s.name)}` : "MC&nbsp;Hoster";
+  const all = [...state.servers.values()];
+  const up = all.filter((x) => x.status === "running").length;
+  sum.textContent = s ? (s.status === "running" ? `${(s.players || []).length}/${s.maxPlayers} on` : statusLabel(s)) : all.length ? `${up}/${all.length} online` : "";
 }
 
 /* ------------------------------------------------------------ global stream */
@@ -408,7 +434,8 @@ function renderSidebar() {
         <span class="dot ${viewStatus(s)}" title="${esc(statusLabel(s))}"></span>
       </div>`).join("") ||
     `<div class="players-empty" style="padding:8px 10px">No servers yet.</div>`;
-  $$(".srv-mini", list).forEach((el) => (el.onclick = () => go("#/server/" + el.dataset.id)));
+  $$(".srv-mini", list).forEach((el) => (el.onclick = () => { closeNav(); go("#/server/" + el.dataset.id); }));
+  paintTopbar();
 
   $$(".nav-item[data-route]").forEach((el) =>
     el.classList.toggle("active", state.route.name === "dashboard" && el.dataset.route === "dashboard"));
@@ -1712,20 +1739,38 @@ async function openPlayerCard(id, name) {
  * How the server is running, not just whether it is. The backend (perf.js)
  * asks the console for TPS / tick time / entities and samples the process for
  * CPU and memory; this tab shows the latest numbers as tiles, a rolling
- * history as small charts (one measure each — they don't share a scale), the
- * "Can't keep up!" log, and what is taking the disk. Live points arrive on the
- * global event stream every 5 s and are appended in place.
+ * history as charts (one measure each — they don't share a scale) that share a
+ * crosshair, zoom by dragging, smooth, pause and export, plus the "Can't keep
+ * up!" log. Live points arrive on the global event stream every 5 s and are
+ * appended in place. (Disk usage lives in the Files tab.)
  */
 const PERF_RANGES = [
-  { id: "15m", label: "15 min", span: 15 * 60000 },
-  { id: "1h", label: "1 hour", span: 3600000 },
-  { id: "24h", label: "24 hours", span: 86400000 },
+  { id: "15m", label: "15m", long: "15 minutes", span: 15 * 60000 },
+  { id: "1h", label: "1h", long: "hour", span: 3600000 },
+  { id: "6h", label: "6h", long: "6 hours", span: 6 * 3600000 },
+  { id: "24h", label: "24h", long: "24 hours", span: 86400000 },
+  { id: "7d", label: "7d", long: "7 days", span: 7 * 86400000 },
 ];
-const PERF_CHART_H = 132;
+// How the charts are shown is a preference, not per-server state: it is kept
+// in this browser and applies to every server's Stats tab.
+const PERF_PREFS_KEY = "mch.perf.prefs";
+const PERF_DEFAULT_PREFS = { range: "15m", metrics: ["tps", "mspt", "cpu", "mem", "players", "entities"], layout: "grid", smooth: "off", lag: true, big: [] };
+function perfPrefs() {
+  if (!perfPrefs.v) {
+    let saved = {};
+    try { saved = JSON.parse(localStorage.getItem(PERF_PREFS_KEY) || "{}") || {}; } catch {}
+    perfPrefs.v = { ...PERF_DEFAULT_PREFS, ...saved };
+  }
+  return perfPrefs.v;
+}
+function savePerfPrefs(patch) {
+  Object.assign(perfPrefs(), patch);
+  try { localStorage.setItem(PERF_PREFS_KEY, JSON.stringify(perfPrefs())); } catch {}
+}
 
 function perfState(id) {
   if (!state.perf || state.perf.id !== id)
-    state.perf = { id, range: "15m", data: null, disk: null, fetchedAt: 0, ro: null };
+    state.perf = { id, range: perfPrefs().range, data: null, fetchedAt: 0, ro: null, view: null, frozenAt: null, hoverT: null };
   return state.perf;
 }
 const perfOpen = (id) => state.route.name === "server" && state.route.id === id && state.activeTab === "stats";
@@ -1741,7 +1786,7 @@ function tpsTileHTML(s) {
   const st = s.stats || {};
   if (s.status !== "running") return "—";
   if (st.idle) return `<span class="muted">idle</span>`;
-  if (st.tps == null) return st.tpsSupport === "no" ? `— <small>n/a</small>` : "—";
+  if (st.tps == null) return st.tpsSupport === "no" ? `— <small>n/a</small>` : st.tpsSupport === "retrying" ? `— <small>retrying</small>` : "—";
   const v = tpsState(st.tps, st.tpsTarget);
   return `<span class="tps-${v.cls}">${st.tps.toFixed(1)}</span> <small>${st.mspt != null ? fmtMs(st.mspt) + " ms/tick" : v.label}</small>`;
 }
@@ -1762,6 +1807,7 @@ function perfSourceLabel(src) {
 
 async function renderStatsTab(id) {
   const P = perfState(id);
+  const prefs = perfPrefs();
   const body = $("#tab-body");
   body.innerHTML = `
     <div class="perf">
@@ -1769,12 +1815,36 @@ async function renderStatsTab(id) {
       <div id="perf-note"></div>
       <div id="perf-dims"></div>
       <div class="perf-bar">
-        <h4>${ico("gauge")} History</h4>
+        <h4>${ico("chart")} History</h4>
         <div class="seg" id="perf-range">
-          ${PERF_RANGES.map((r) => `<button class="seg-btn ${r.id === P.range ? "on" : ""}" data-r="${r.id}">${r.label}</button>`).join("")}
+          ${PERF_RANGES.map((r) => `<button class="seg-btn ${r.id === P.range ? "on" : ""}" data-r="${r.id}" title="Last ${r.long}">${r.label}</button>`).join("")}
+        </div>
+        <div class="perf-bar-right">
+          <button class="btn btn-sm btn-ghost" id="perf-zoom-out" title="Zoom out">${ico("zoomout")}</button>
+          <button class="btn btn-sm" id="perf-zoom-reset" hidden title="Back to the whole range (or double-click a chart)">Reset zoom</button>
+          <button class="btn btn-sm btn-ghost perf-live" id="perf-live" title="Pause or resume live updates"></button>
+          <button class="btn btn-sm btn-ghost" id="perf-csv" title="Download what the charts show as a spreadsheet">${ico("download")} CSV</button>
         </div>
       </div>
-      <div class="perf-charts" id="perf-charts"></div>
+      <div class="perf-opts">
+        <div class="perf-chips" id="perf-metrics" title="Which charts to show"></div>
+        <div class="perf-opt">
+          <span class="muted">Smoothing</span>
+          <div class="seg seg-sm" id="perf-smooth">
+            ${[["off", "Off"], ["light", "Light"], ["heavy", "Heavy"]].map(([k, l]) => `<button class="seg-btn ${prefs.smooth === k ? "on" : ""}" data-v="${k}">${l}</button>`).join("")}
+          </div>
+        </div>
+        <div class="perf-opt">
+          <span class="muted">Layout</span>
+          <div class="seg seg-sm" id="perf-layout">
+            ${[["grid", "Grid"], ["list", "Large"]].map(([k, l]) => `<button class="seg-btn ${prefs.layout === k ? "on" : ""}" data-v="${k}">${l}</button>`).join("")}
+          </div>
+        </div>
+        <label class="perf-opt perf-check"><input type="checkbox" id="perf-lagmarks" ${prefs.lag ? "checked" : ""}/> <span>Lag spike markers</span></label>
+      </div>
+      <div class="perf-window muted" id="perf-window"></div>
+      <div class="perf-charts ${prefs.layout === "list" ? "list" : ""}" id="perf-charts"></div>
+      <p class="hint perf-howto">Hover (or drag a finger) over a chart to read every chart at that moment. Drag across a chart with the mouse to zoom in on that stretch; double-click to zoom back out.</p>
       <div class="perf-lower">
         <section class="plog-pane">
           <header class="plog-pane-head">
@@ -1783,32 +1853,44 @@ async function renderStatsTab(id) {
           </header>
           <div id="perf-lag" class="perf-lag"></div>
         </section>
-        <div class="perf-side">
-          <section class="plog-pane">
-            <header class="plog-pane-head"><h4>${ico("clock")} This run</h4></header>
-            <div id="perf-session" class="perf-kv"></div>
-          </section>
-          <section class="plog-pane">
-            <header class="plog-pane-head">
-              <h4>${ico("folder")} Disk usage</h4>
-              <div class="plog-tools"><button class="btn btn-sm btn-ghost" id="perf-disk-refresh" title="Measure again">${ico("rotate")}</button></div>
-            </header>
-            <div id="perf-disk" class="perf-disk"><div class="players-empty">Measuring…</div></div>
-          </section>
-        </div>
+        <section class="plog-pane">
+          <header class="plog-pane-head"><h4>${ico("clock")} This run</h4></header>
+          <div id="perf-session" class="perf-kv"></div>
+        </section>
       </div>
     </div>`;
 
   $$("#perf-range .seg-btn").forEach((b) => (b.onclick = () => {
     P.range = b.dataset.r;
+    P.view = null;
+    savePerfPrefs({ range: P.range });
     $$("#perf-range .seg-btn").forEach((x) => x.classList.toggle("on", x === b));
     perfLoad(id);
   }));
+  $$("#perf-smooth .seg-btn").forEach((b) => (b.onclick = () => {
+    savePerfPrefs({ smooth: b.dataset.v });
+    $$("#perf-smooth .seg-btn").forEach((x) => x.classList.toggle("on", x === b));
+    perfPaintCharts(id);
+  }));
+  $$("#perf-layout .seg-btn").forEach((b) => (b.onclick = () => {
+    savePerfPrefs({ layout: b.dataset.v });
+    $$("#perf-layout .seg-btn").forEach((x) => x.classList.toggle("on", x === b));
+    $("#perf-charts").classList.toggle("list", b.dataset.v === "list");
+    perfPaintCharts(id, true);
+  }));
+  $("#perf-lagmarks").onchange = (e) => { savePerfPrefs({ lag: e.target.checked }); perfPaintCharts(id); };
+  $("#perf-live").onclick = () => {
+    P.frozenAt = P.frozenAt ? null : Date.now();
+    perfPaintCharts(id);
+  };
+  $("#perf-zoom-reset").onclick = () => { P.view = null; perfPaintCharts(id); };
+  $("#perf-zoom-out").onclick = () => perfZoomOut(id);
+  $("#perf-csv").onclick = () => perfDownloadCsv(id);
   $("#perf-lag-clear").onclick = async () => {
     if (!(await confirmDialog("Clear lag spikes?", "<p class='muted'>Forgets the recorded “Can't keep up!” warnings for this server. Charts are kept.</p>", "Clear"))) return;
     try { await API.del(`/api/servers/${id}/stats/lag`); if (P.data) P.data.lag = []; perfPaint(id); } catch (e) { toast(e.message, "err"); }
   };
-  $("#perf-disk-refresh").onclick = () => perfLoadDisk(id, true);
+  perfPaintMetricChips(id);
 
   if (P.ro) P.ro.disconnect();
   if (window.ResizeObserver) {
@@ -1819,7 +1901,22 @@ async function renderStatsTab(id) {
 
   perfPaint(id); // tiles from the summary we already hold, before the fetch
   await perfLoad(id);
-  perfLoadDisk(id);
+}
+
+function perfPaintMetricChips(id) {
+  const box = $("#perf-metrics");
+  if (!box) return;
+  const on = new Set(perfPrefs().metrics);
+  box.innerHTML = perfCharts(id).map((c) =>
+    `<button class="fchip ${on.has(c.key) ? "on" : "off"}" data-k="${c.key}" title="${on.has(c.key) ? "Hide" : "Show"} ${esc(c.title)}">${esc(c.title)}</button>`).join("");
+  $$(".fchip", box).forEach((b) => (b.onclick = () => {
+    const keys = new Set(perfPrefs().metrics);
+    if (keys.has(b.dataset.k)) keys.delete(b.dataset.k); else keys.add(b.dataset.k);
+    // Keep the order the charts are defined in, whatever order they were ticked.
+    savePerfPrefs({ metrics: perfCharts(id).map((c) => c.key).filter((k) => keys.has(k)) });
+    perfPaintMetricChips(id);
+    perfPaintCharts(id, true);
+  }));
 }
 
 async function perfLoad(id) {
@@ -1835,35 +1932,23 @@ async function perfLoad(id) {
   if (perfOpen(id)) perfPaint(id);
 }
 
-async function perfLoadDisk(id, force) {
-  const P = perfState(id);
-  const box = $("#perf-disk");
-  if (force && box) box.innerHTML = `<div class="players-empty">Measuring…</div>`;
-  try {
-    const { disk } = await API.get(`/api/servers/${id}/stats/disk${force ? "?t=" + Date.now() : ""}`);
-    P.disk = disk;
-  } catch (e) {
-    if (box) box.innerHTML = `<div class="players-empty">${esc(e.message)}</div>`;
-    return;
-  }
-  if (perfOpen(id)) perfPaintDisk(id);
-}
-
 // A live sample: refresh the tiles, and extend the fine-grained history.
 function perfLive(e) {
   const P = perfState(e.id);
   if (!P.data) return;
   const { type, id, point, ...cur } = e;
   P.data.current = cur;
-  if (point && P.range !== "24h") {
+  const range = PERF_RANGES.find((r) => r.id === P.range);
+  if (point && P.data.history.step <= 5000) {
     P.data.history.points.push(point);
-    const span = PERF_RANGES.find((r) => r.id === P.range).span;
-    const from = Date.now() - span;
+    const from = Date.now() - range.span;
     while (P.data.history.points.length && P.data.history.points[0].t < from) P.data.history.points.shift();
-  } else if (P.range === "24h" && Date.now() - P.fetchedAt > 60000) {
-    return perfLoad(e.id); // a new minute has been averaged
+  } else if (P.data.history.step > 5000 && Date.now() - P.fetchedAt > Math.max(60000, P.data.history.step)) {
+    if (!P.frozenAt) return perfLoad(e.id); // a new minute (or ten) has been averaged
   }
-  perfPaint(e.id);
+  perfPaintTiles(e.id);
+  perfPaintSession(e.id);
+  if (!P.frozenAt) perfPaintCharts(e.id);
 }
 
 function perfPaint(id) {
@@ -1900,6 +1985,7 @@ function perfPaintTiles(id) {
   if (!up) tpsSub = "server offline";
   else if (st.idle) tpsSub = s.paused ? "paused — nothing is ticking" : "empty — not asking, so it can pause";
   else if (st.tpsSupport === "no") tpsSub = "this server can't report it";
+  else if (st.tpsSupport === "retrying") tpsSub = `not answering — asking again ${st.tpsRetryAt ? fmtIn(st.tpsRetryAt) : "soon"}`;
   else if (st.tps == null) tpsSub = "asking the server…";
   else if (st.tps1m != null) tpsSub = `1m ${st.tps1m} · 5m ${st.tps5m ?? "—"} · 15m ${st.tps15m ?? "—"}`;
   else tpsSub = `target ${st.tpsTarget || 20}${st.tickState && st.tickState !== "normal" ? " · " + st.tickState : ""}`;
@@ -1938,6 +2024,8 @@ function perfPaintTiles(id) {
   if (note) {
     note.innerHTML = up && st.tpsSupport === "no"
       ? `<div class="banner perf-banner">${ico("alert")}<div>This server has no command that reports TPS. That needs Minecraft <b>1.20.3+</b> (any loader — it has <code>/tick query</code>), or Paper, Purpur, Forge or NeoForge on any version. CPU, memory, players and lag spikes are still tracked.</div></div>`
+      : up && st.tpsSupport === "retrying"
+      ? `<div class="banner perf-banner">${ico("alert")}<div>The server stopped answering the TPS question, so it has been set aside for a few minutes and will be asked again ${st.tpsRetryAt ? fmtIn(st.tpsRetryAt) : "shortly"}. A server that is very busy (booting a big modpack, or lagging hard) can miss its answers. CPU, memory, players and lag spikes are still tracked.</div></div>`
       : "";
   }
   const dims = $("#perf-dims");
@@ -1951,7 +2039,7 @@ function perfPaintTiles(id) {
 // One chart per measure — never two scales on one axis.
 function perfCharts(id) {
   const s = state.servers.get(id) || {};
-  const st = (state.perf.data && state.perf.data.current) || {};
+  const st = (state.perf && state.perf.data && state.perf.data.current) || {};
   const target = st.tpsTarget || 20;
   const budget = 1000 / target;
   return [
@@ -1971,41 +2059,150 @@ function niceMax(v) {
   return 10 * p;
 }
 
-function perfPaintCharts(id) {
+// The time window the charts show: a zoom if there is one, otherwise the whole
+// range up to now (or up to the moment live updates were paused).
+function perfWindow(P) {
+  const range = PERF_RANGES.find((r) => r.id === P.range) || PERF_RANGES[0];
+  const end = P.frozenAt || Date.now();
+  return P.view ? { x0: P.view.x0, x1: P.view.x1, zoomed: true } : { x0: end - range.span, x1: end, zoomed: false };
+}
+
+// Centred moving average inside each unbroken run of readings.
+function perfSmooth(pts, key, mode, step) {
+  if (mode === "off" || pts.length < 4) return pts;
+  const k = mode === "heavy" ? Math.max(5, Math.round(pts.length / 18)) : Math.max(3, Math.round(pts.length / 60));
+  const half = Math.floor(k / 2);
+  const out = pts.map((p) => ({ ...p }));
+  for (let i = 0; i < pts.length; i++) {
+    if (pts[i][key] == null) continue;
+    let sum = 0, n = 0;
+    for (let j = i - half; j <= i + half; j++) {
+      const q = pts[j];
+      if (!q || q[key] == null || Math.abs(q.t - pts[i].t) > step * (half + 1.5)) continue;
+      sum += q[key];
+      n++;
+    }
+    out[i][key] = n ? sum / n : pts[i][key];
+  }
+  return out;
+}
+
+function perfPaintCharts(id, rebuild = false) {
   const box = $("#perf-charts");
   const P = perfState(id);
   if (!box || !P.data) return;
-  const charts = perfCharts(id);
-  if (box.children.length !== charts.length) {
-    box.innerHTML = charts.map((c) => `
-      <div class="perf-chart" data-k="${c.key}">
-        <div class="pc-head"><span class="pc-title">${c.title}</span>${c.lag ? `<span class="pc-key"><i class="lag-key"></i>lag spike</span>` : ""}<b class="pc-now"></b></div>
-        <div class="pc-plot"><svg height="${PERF_CHART_H}"></svg><div class="pc-tip" hidden></div></div>
-      </div>`).join("");
+  const prefs = perfPrefs();
+  const charts = perfCharts(id).filter((c) => prefs.metrics.includes(c.key));
+  const big = new Set(prefs.big || []);
+  const want = charts.map((c) => c.key + (big.has(c.key) ? "+" : "")).join(",");
+  if (rebuild || box.dataset.keys !== want) {
+    box.dataset.keys = want;
+    box.innerHTML = charts.length ? charts.map((c) => `
+      <div class="perf-chart ${big.has(c.key) ? "big" : ""}" data-k="${c.key}">
+        <div class="pc-head">
+          <span class="pc-title">${c.title}</span>
+          ${c.lag && prefs.lag ? `<span class="pc-key"><i class="lag-key"></i>lag spike</span>` : ""}
+          <b class="pc-now"></b>
+          <button class="pc-btn" data-big="${c.key}" title="${big.has(c.key) ? "Make smaller" : "Make bigger"}">${ico(big.has(c.key) ? "shrink" : "expand")}</button>
+        </div>
+        <div class="pc-plot"><svg></svg><div class="pc-tip" hidden></div></div>
+        <div class="pc-sum"></div>
+      </div>`).join("")
+      : `<div class="players-empty">No charts picked — choose some above.</div>`;
+    $$(".pc-btn[data-big]", box).forEach((b) => (b.onclick = () => {
+      const set = new Set(perfPrefs().big || []);
+      if (set.has(b.dataset.big)) set.delete(b.dataset.big); else set.add(b.dataset.big);
+      savePerfPrefs({ big: [...set] });
+      perfPaintCharts(id, true);
+    }));
   }
-  const range = PERF_RANGES.find((r) => r.id === P.range);
-  const now = Date.now();
-  const x0 = now - range.span;
-  const pts = P.data.history.points.filter((p) => p && p.t >= x0);
+
+  const win = perfWindow(P);
   const step = P.data.history.step || 5000;
-  for (const c of charts) drawPerfChart($(`.perf-chart[data-k="${c.key}"]`, box), c, pts, { x0, x1: now, step, lag: c.lag ? (P.data.lag || []) : null });
+  const all = P.data.history.points.filter((p) => p && p.t >= win.x0 - step && p.t <= win.x1 + step);
+  const lag = prefs.lag ? P.data.lag || [] : null;
+  const H = prefs.layout === "list" ? 200 : 140;
+  for (const c of charts) {
+    const card = $(`.perf-chart[data-k="${c.key}"]`, box);
+    if (!card) continue;
+    const pts = c.step ? all : perfSmooth(all, c.key, prefs.smooth, step);
+    drawPerfChart(id, card, c, pts, all, { ...win, step, lag: c.lag ? lag : null, H: card.classList.contains("big") ? Math.round(H * 1.6) : H });
+  }
+
+  // Toolbar state follows the window.
+  const range = PERF_RANGES.find((r) => r.id === P.range);
+  const reset = $("#perf-zoom-reset");
+  if (reset) reset.hidden = !win.zoomed;
+  const zo = $("#perf-zoom-out");
+  if (zo) zo.disabled = !win.zoomed;
+  const live = $("#perf-live");
+  if (live) {
+    live.innerHTML = P.frozenAt ? `${ico("play")} Resume` : `<i class="live-dot"></i> Live`;
+    live.classList.toggle("paused", !!P.frozenAt);
+  }
+  const wl = $("#perf-window");
+  if (wl) {
+    const parts = [`${fmtWhen(win.x0)} → ${win.zoomed || P.frozenAt ? fmtWhen(win.x1) : "now"}`];
+    parts.push(step >= 600000 ? "10-minute averages" : step >= 60000 ? "1-minute averages" : "every 5 s");
+    if (win.zoomed) parts.push(`zoomed in on ${fmtSpan(win.x1 - win.x0)} of the last ${range.long}`);
+    if (P.frozenAt) parts.push("paused — new readings are kept but not drawn");
+    wl.textContent = parts.join(" · ");
+  }
 }
 
-function drawPerfChart(card, c, pts, dom) {
-  const svg = $("svg", card);
+function fmtSpan(ms) {
+  if (ms < 120000) return Math.round(ms / 1000) + " s";
+  if (ms < 7200000) return Math.round(ms / 60000) + " min";
+  if (ms < 172800000) return (ms / 3600000).toFixed(ms < 36000000 ? 1 : 0) + " h";
+  return (ms / 86400000).toFixed(1) + " days";
+}
+
+function perfZoomOut(id) {
+  const P = perfState(id);
+  if (!P.view) return;
+  const range = PERF_RANGES.find((r) => r.id === P.range);
+  const end = P.frozenAt || Date.now();
+  const mid = (P.view.x0 + P.view.x1) / 2;
+  const span = (P.view.x1 - P.view.x0) * 2;
+  if (span >= range.span * 0.95) P.view = null;
+  else {
+    let x1 = Math.min(end, mid + span / 2);
+    let x0 = Math.max(end - range.span, x1 - span);
+    x1 = x0 + span;
+    P.view = { x0, x1 };
+  }
+  perfPaintCharts(id);
+}
+
+// Every chart shares one crosshair: pointing at a moment on any of them shows
+// that moment on all of them.
+function perfHover(id, t, source) {
+  const P = perfState(id);
+  P.hoverT = t;
+  $$("#perf-charts .perf-chart").forEach((card) => card._hover && card._hover(t, card === source));
+}
+
+function drawPerfChart(id, card, c, pts, raw, dom) {
+  const svg = $(".pc-plot svg", card);
   const plot = $(".pc-plot", card);
   const W = Math.max(200, plot.clientWidth || 400);
-  const H = PERF_CHART_H;
-  const pad = { l: 40, r: 10, t: 10, b: 20 };
+  const H = dom.H;
+  const pad = { l: 42, r: 10, t: 10, b: 20 };
   const iw = W - pad.l - pad.r, ih = H - pad.t - pad.b;
   svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
   svg.setAttribute("width", W);
+  svg.setAttribute("height", H);
 
-  const vals = pts.map((p) => p[c.key]).filter((v) => v != null);
-  const last = [...pts].reverse().find((p) => p[c.key] != null);
-  $(".pc-now", card).textContent = last ? `${c.fmt(last[c.key])}${c.unit ? " " + c.unit : ""}` : "";
+  const inWin = pts.filter((p) => p.t >= dom.x0 && p.t <= dom.x1);
+  const rawWin = raw.filter((p) => p.t >= dom.x0 && p.t <= dom.x1 && p[c.key] != null);
+  const vals = inWin.map((p) => p[c.key]).filter((v) => v != null);
+  const last = [...rawWin].reverse()[0];
+  const nowText = last ? `${c.fmt(last[c.key])}${c.unit ? " " + c.unit : ""}` : "";
+  const nowEl = $(".pc-now", card);
+  nowEl.textContent = nowText;
   const yMax = c.yMax(vals.length ? Math.max(...vals) : 0) || 1;
-  const X = (t) => pad.l + ((t - dom.x0) / (dom.x1 - dom.x0)) * iw;
+  const span = dom.x1 - dom.x0;
+  const X = (t) => pad.l + ((t - dom.x0) / span) * iw;
   const Y = (v) => pad.t + ih - (Math.max(0, Math.min(v, yMax)) / yMax) * ih;
 
   // Recessive grid: four bands, labels in muted ink.
@@ -2015,11 +2212,12 @@ function drawPerfChart(card, c, pts, dom) {
     g += `<line class="grid" x1="${pad.l}" x2="${W - pad.r}" y1="${y}" y2="${y}"/>`;
     g += `<text class="ax" x="${pad.l - 6}" y="${y + 3.5}" text-anchor="end">${esc(axisFmt(c, v))}</text>`;
   }
-  const span = dom.x1 - dom.x0;
-  for (let i = 0; i <= 4; i++) {
-    const t = dom.x0 + (span / 4) * i;
-    const anchor = i === 0 ? "start" : i === 4 ? "end" : "middle";
-    g += `<text class="ax" x="${X(t)}" y="${H - 5}" text-anchor="${anchor}">${i === 4 ? "now" : esc(timeTick(t, span))}</text>`;
+  const ticks = W < 360 ? 2 : 4;
+  for (let i = 0; i <= ticks; i++) {
+    const t = dom.x0 + (span / ticks) * i;
+    const anchor = i === 0 ? "start" : i === ticks ? "end" : "middle";
+    const label = i === ticks && !dom.zoomed && !perfState(id).frozenAt ? "now" : timeTick(t, span, dom.zoomed || !!perfState(id).frozenAt);
+    g += `<text class="ax" x="${X(t)}" y="${H - 5}" text-anchor="${anchor}">${esc(label)}</text>`;
   }
   if (c.ref && c.ref.v <= yMax) {
     const y = Y(c.ref.v);
@@ -2032,7 +2230,7 @@ function drawPerfChart(card, c, pts, dom) {
   let cur = null, prevT = null;
   for (const p of pts) {
     const v = p[c.key];
-    if (v == null || (prevT != null && p.t - prevT > dom.step * 2.5)) { cur = null; }
+    if (v == null || (prevT != null && p.t - prevT > dom.step * 2.5)) cur = null;
     if (v != null) {
       if (!cur) segs.push((cur = []));
       cur.push([X(p.t), Y(v)]);
@@ -2053,38 +2251,109 @@ function drawPerfChart(card, c, pts, dom) {
       ? `<circle class="dot" cx="${sg[0][0]}" cy="${sg[0][1]}" r="2.5"/>`
       : `<path class="line" d="${d}"/>`;
   }
+  // The worst moment of each averaged point, as a faint band under the TPS line.
+  if (c.key === "tps" && dom.step >= 60000) {
+    const lows = inWin.filter((p) => p.tpsMin != null && p.tps != null && p.tpsMin < p.tps - 0.2);
+    for (const p of lows) lines += `<line class="low" x1="${X(p.t)}" x2="${X(p.t)}" y1="${Y(p.tps)}" y2="${Y(p.tpsMin)}"/>`;
+  }
 
   let marks = "";
   if (dom.lag)
     for (const l of dom.lag) {
       if (l.t < dom.x0 || l.t > dom.x1) continue;
       const x = X(l.t);
-      marks += `<path class="lag-mark" d="M${x - 4},${pad.t} L${x + 4},${pad.t} L${x},${pad.t + 6}Z"><title>${esc(fmtClock(l.t))} — ${l.ms} ms behind (${l.ticks} ticks)</title></path>`;
+      marks += `<path class="lag-mark" d="M${x - 4},${pad.t} L${x + 4},${pad.t} L${x},${pad.t + 6}Z"><title>${esc(fmtWhen(l.t))} — ${l.ms} ms behind (${l.ticks} ticks)</title></path>`;
     }
 
   const empty = vals.length ? "" : `<text class="ax empty" x="${pad.l + iw / 2}" y="${pad.t + ih / 2}" text-anchor="middle">${c.key === "tps" || c.key === "mspt" || c.key === "entities" ? "No readings in this window" : "No data in this window yet"}</text>`;
-  svg.innerHTML = `${g}${lines}${marks}${empty}<line class="xhair" y1="${pad.t}" y2="${pad.t + ih}" visibility="hidden"/><circle class="xdot" r="3.5" visibility="hidden"/><rect class="hit" x="${pad.l}" y="0" width="${iw}" height="${H}"/>`;
+  svg.innerHTML = `${g}${lines}${marks}${empty}<rect class="sel" y="${pad.t}" height="${ih}" width="0" visibility="hidden"/><line class="xhair" y1="${pad.t}" y2="${pad.t + ih}" visibility="hidden"/><circle class="xdot" r="3.5" visibility="hidden"/><rect class="hit" x="${pad.l}" y="0" width="${iw}" height="${H}"/>`;
 
-  // Crosshair + tooltip on the nearest sample.
+  // Summary of what's on screen.
+  const sum = $(".pc-sum", card);
+  const rv = rawWin.map((p) => p[c.key]);
+  if (rv.length) {
+    const lo = Math.min(...rv), hi = Math.max(...rv), avg = rv.reduce((a, b) => a + b, 0) / rv.length;
+    const f = (v) => `${c.fmt(v)}${c.unit && c.unit !== "online" ? " " + c.unit : ""}`;
+    let extra = "";
+    if (c.key === "tps") {
+      const target = (state.perf.data.current || {}).tpsTarget || 20;
+      const good = rv.filter((v) => v >= target * 0.95).length / rv.length;
+      extra = `<span><em>healthy</em> ${Math.round(good * 100)}% of the time</span>`;
+    }
+    sum.innerHTML = `<span><em>min</em> ${esc(f(lo))}</span><span><em>avg</em> ${esc(f(avg))}</span><span><em>max</em> ${esc(f(hi))}</span>${extra}`;
+  } else sum.innerHTML = "";
+
+  // Crosshair + tooltip on the nearest sample; driven from any chart.
   const tip = $(".pc-tip", card);
-  const hx = $(".xhair", svg), hd = $(".xdot", svg), hit = $(".hit", svg);
-  const withVal = pts.filter((p) => p[c.key] != null);
-  hit.onmousemove = (ev) => {
-    if (!withVal.length) return;
-    const r = svg.getBoundingClientRect();
-    const t = dom.x0 + ((ev.clientX - r.left - pad.l) / iw) * span;
+  const hx = $(".xhair", svg), hd = $(".xdot", svg), hit = $(".hit", svg), sel = $(".sel", svg);
+  const withVal = inWin.filter((p) => p[c.key] != null);
+  const rawBy = new Map(rawWin.map((p) => [p.t, p]));
+  card._hover = (t, mine) => {
+    if (t == null || !withVal.length || t < dom.x0 || t > dom.x1) {
+      tip.hidden = true;
+      hx.setAttribute("visibility", "hidden");
+      hd.setAttribute("visibility", "hidden");
+      nowEl.textContent = nowText;
+      nowEl.classList.remove("at");
+      return;
+    }
     let best = withVal[0];
     for (const p of withVal) if (Math.abs(p.t - t) < Math.abs(best.t - t)) best = p;
+    if (Math.abs(best.t - t) > Math.max(dom.step * 3, span / 40)) return card._hover(null);
+    const shown = (rawBy.get(best.t) || best)[c.key];
     const x = X(best.t), y = Y(best[c.key]);
     hx.setAttribute("x1", x); hx.setAttribute("x2", x); hx.setAttribute("visibility", "visible");
     hd.setAttribute("cx", x); hd.setAttribute("cy", y); hd.setAttribute("visibility", "visible");
-    const extra = c.key === "tps" && best.tpsMin != null && best.tpsMin < best.tps ? ` <span>low ${best.tpsMin.toFixed(1)}</span>` : "";
-    tip.innerHTML = `<b>${esc(c.fmt(best[c.key]))}${c.unit ? " " + c.unit : ""}</b>${extra}<span>${esc(fmtWhen(best.t))}</span>`;
+    const val = `${c.fmt(shown)}${c.unit ? " " + c.unit : ""}`;
+    nowEl.textContent = `${val} · ${fmtClock(best.t)}`;
+    nowEl.classList.add("at");
+    if (!mine) { tip.hidden = true; return; }
+    const low = c.key === "tps" && best.tpsMin != null && best.tpsMin < shown ? ` <span>low ${best.tpsMin.toFixed(1)}</span>` : "";
+    const avgNote = dom.step >= 60000 ? ` <span>${dom.step >= 600000 ? "10-min" : "1-min"} average</span>` : "";
+    tip.innerHTML = `<b>${esc(val)}</b>${low}${avgNote}<span>${esc(fmtWhen(best.t))}</span>`;
     tip.hidden = false;
     const tw = tip.offsetWidth;
     tip.style.left = Math.max(0, Math.min(W - tw, x - tw / 2)) + "px";
   };
-  hit.onmouseleave = () => { tip.hidden = true; hx.setAttribute("visibility", "hidden"); hd.setAttribute("visibility", "hidden"); };
+  if (perfState(id).hoverT != null) card._hover(perfState(id).hoverT, false);
+
+  const tAt = (ev) => {
+    const r = svg.getBoundingClientRect();
+    const px = ((ev.clientX - r.left) / r.width) * W;
+    return dom.x0 + ((Math.max(pad.l, Math.min(W - pad.r, px)) - pad.l) / iw) * span;
+  };
+  // Mouse: hover reads, drag zooms. Touch: a finger dragged sideways reads
+  // (vertical swipes still scroll the page — see touch-action in the CSS).
+  let drag = null;
+  hit.onpointerdown = (ev) => {
+    if (ev.pointerType === "mouse" && ev.button === 0) {
+      drag = { t0: tAt(ev), x0: ev.clientX };
+      hit.setPointerCapture(ev.pointerId);
+    } else if (ev.pointerType !== "mouse") perfHover(id, tAt(ev), card);
+  };
+  hit.onpointermove = (ev) => {
+    const t = tAt(ev);
+    if (drag && Math.abs(ev.clientX - drag.x0) > 4) {
+      const a = X(Math.min(drag.t0, t)), b = X(Math.max(drag.t0, t));
+      sel.setAttribute("x", a); sel.setAttribute("width", Math.max(1, b - a)); sel.setAttribute("visibility", "visible");
+    }
+    perfHover(id, t, card);
+  };
+  hit.onpointerup = (ev) => {
+    if (!drag) return;
+    const t = tAt(ev), d = drag;
+    drag = null;
+    sel.setAttribute("visibility", "hidden");
+    if (Math.abs(ev.clientX - d.x0) <= 6) return;
+    const a = Math.min(d.t0, t), b = Math.max(d.t0, t);
+    if (b - a < dom.step * 3) return toast("That's too narrow to zoom into — drag across a wider stretch.", "");
+    perfState(id).view = { x0: a, x1: b };
+    perfHover(id, null);
+    perfPaintCharts(id);
+  };
+  hit.onpointercancel = () => { drag = null; sel.setAttribute("visibility", "hidden"); perfHover(id, null); };
+  hit.onpointerleave = (ev) => { if (!drag) perfHover(id, null); };
+  hit.ondblclick = () => { if (perfState(id).view) { perfState(id).view = null; perfPaintCharts(id); } };
 }
 
 function axisFmt(c, v) {
@@ -2092,11 +2361,30 @@ function axisFmt(c, v) {
   if (v >= 10000) return Math.round(v / 1000) + "k";
   return Number.isInteger(v) ? String(v) : v.toFixed(1);
 }
-function timeTick(t, span) {
+function timeTick(t, span, absolute) {
   const d = new Date(t);
-  return span > 6 * 3600000
-    ? d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false })
-    : "-" + Math.round((Date.now() - t) / 60000) + "m";
+  if (span > 2 * 86400000) return d.toLocaleDateString([], { weekday: "short" }) + " " + d.toLocaleTimeString([], { hour: "2-digit", hour12: false });
+  if (absolute || span > 3 * 3600000) return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+  return "-" + Math.round((Date.now() - t) / 60000) + "m";
+}
+
+// What the charts show right now, as a spreadsheet.
+function perfDownloadCsv(id) {
+  const P = perfState(id);
+  if (!P.data) return;
+  const win = perfWindow(P);
+  const rows = P.data.history.points.filter((p) => p.t >= win.x0 && p.t <= win.x1);
+  if (!rows.length) return toast("Nothing in this window to download.", "");
+  const keys = ["tps", "tpsMin", "mspt", "cpu", "mem", "players", "entities"];
+  const head = ["time", "TPS", "TPS (lowest)", "tick time ms", "CPU %", "memory MB", "players", "entities"];
+  const csv = [head.join(",")].concat(rows.map((p) => [new Date(p.t).toISOString(), ...keys.map((k) => (p[k] == null ? "" : p[k]))].join(","))).join("\n");
+  const name = ((state.servers.get(id) || {}).name || "server").replace(/[^A-Za-z0-9_-]+/g, "-");
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+  a.download = `${name}-stats-${P.range}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
 }
 
 function perfPaintLag(id) {
@@ -2128,28 +2416,9 @@ function perfPaintSession(id) {
     ["In-game day", st.day != null ? fmtNum(st.day) : "—"],
     ["Java threads", st.threads ? fmtNum(st.threads) : "—"],
     ["Heap limit", fmtMem(s.memory || 0)],
-    ["TPS from", up && st.tpsSource ? perfSourceLabel(st.tpsSource) : up && st.tpsSupport === "no" ? "not available" : "—"],
+    ["TPS from", up && st.tpsSource ? perfSourceLabel(st.tpsSource) : up && st.tpsSupport === "no" ? "not available" : up && st.tpsSupport === "retrying" ? "retrying" : "—"],
   ];
   box.innerHTML = rows.map(([k, v]) => `<div><span>${k}</span><b>${esc(v)}</b></div>`).join("");
-}
-
-function perfPaintDisk(id) {
-  const box = $("#perf-disk");
-  const P = perfState(id);
-  if (!box || !P.disk) return;
-  const d = P.disk;
-  const top = d.entries.slice(0, 7);
-  const rest = d.entries.slice(7).reduce((a, e) => a + e.bytes, 0);
-  if (rest) top.push({ name: `${d.entries.length - 7} more`, bytes: rest, other: true });
-  const max = Math.max(1, ...top.map((e) => e.bytes));
-  box.innerHTML = `
-    <div class="perf-disk-total"><b>${fmtBytes(d.total)}</b> <span class="muted">in the server folder · measured ${fmtAgo(d.at)}</span></div>
-    ${top.map((e) => `
-      <div class="perf-disk-row" title="${esc(e.name)} — ${fmtBytes(e.bytes)}">
-        <span class="n">${e.other ? "" : ico(e.dir ? "folder" : "file")} ${esc(e.name)}</span>
-        <span class="bar"><i style="width:${(e.bytes / max) * 100}%"></i></span>
-        <span class="v mono">${fmtBytes(e.bytes)}</span>
-      </div>`).join("")}`;
 }
 
 /* ------------------------------------------------------- live patch (server) */
@@ -2723,6 +2992,16 @@ let fmQuery = "";        // text in the search box
 let fmRows = [];         // entries on screen, in display order
 let fmSel = new Set();   // paths ticked, relative to the server folder
 let fmAnchor = null;     // index of the last row touched, for shift-click
+let fmDisk = null;       // what's taking the space in fmDir: { path, total, entries, at }
+// Sizes and the sort order are this browser's preference, for every server.
+const fmPrefs = (() => {
+  let v = {};
+  try { v = JSON.parse(localStorage.getItem("mch.files.prefs") || "{}") || {}; } catch {}
+  return { sizes: v.sizes !== false, sort: v.sort === "size" ? "size" : "name" };
+})();
+function saveFmPrefs() {
+  try { localStorage.setItem("mch.files.prefs", JSON.stringify(fmPrefs)); } catch {}
+}
 
 async function renderFilesTab(id, dir = "") {
   const body = $("#tab-body");
@@ -2736,7 +3015,8 @@ async function renderFilesTab(id, dir = "") {
         <input type="text" id="fm-q" placeholder="Search this folder…" autocomplete="off" spellcheck="false" />
         <button class="fm-x" id="fm-q-clear" title="Clear search" hidden>×</button>
       </div>
-      <div style="margin-left:auto;display:flex;gap:8px">
+      <div class="fm-acts">
+        <button class="btn btn-sm ${fmPrefs.sizes ? "on" : ""}" id="fm-sizes" title="Show what's taking the space in this folder">${ico("chart")} Disk usage</button>
         <button class="btn btn-sm" id="fm-mkdir">${ico("plus")} New folder</button>
         <label class="btn btn-sm" style="cursor:pointer" title="Upload a folder, keeping its structure">${ico("folder")} Upload folder
           <input type="file" id="fm-upload-dir" webkitdirectory directory multiple style="display:none" />
@@ -2750,6 +3030,7 @@ async function renderFilesTab(id, dir = "") {
       <div class="fm-prog-track"><i id="fm-prog-fill"></i></div>
       <span class="fm-prog-text" id="fm-prog-text"></span>
     </div>
+    <div class="fm-usage" id="fm-usage" hidden></div>
     <div class="fm-drop" id="fm-drop">
       <div class="file-table" id="fm-table"></div>
       <p class="hint" style="margin-top:10px">Drag files or whole folders in from your desktop — drop them on a folder row to go straight inside it. Tick rows to delete or move several at once; shift-click extends the selection. Mods go in <span class="mono">mods/</span>, plugins in <span class="mono">plugins/</span>, datapacks in <span class="mono">world/datapacks/</span> — or install them from Modrinth in the previous tab.</p>
@@ -2769,6 +3050,13 @@ async function renderFilesTab(id, dir = "") {
   };
   $("#fm-q-clear").onclick = () => { q.value = ""; q.oninput(); q.focus(); };
 
+  $("#fm-sizes").onclick = () => {
+    fmPrefs.sizes = !fmPrefs.sizes;
+    saveFmPrefs();
+    $("#fm-sizes").classList.toggle("on", fmPrefs.sizes);
+    if (fmPrefs.sizes) loadDisk(id, fmDir);
+    else { fmDisk = null; paintUsage(id); paintFiles(id); }
+  };
   $("#fm-mkdir").onclick = async () => {
     const name = prompt("New folder name:");
     if (!name) return;
@@ -2953,7 +3241,7 @@ async function runUpload(id, dest, files, dirs) {
   refreshFiles(id);
 }
 
-async function loadDir(id, dir) {
+async function loadDir(id, dir, fresh = false) {
   const table = $("#fm-table"), crumb = $("#fm-crumb");
   fmDir = dir;
   fmDeep = null;
@@ -2964,7 +3252,10 @@ async function loadDir(id, dir) {
       ` / <a data-p="${esc(parts.slice(0, i + 1).join("/"))}">${esc(p)}</a>`).join("");
     $$("#fm-crumb a").forEach((a) => (a.onclick = () => renderFilesTab(id, a.dataset.p)));
     fmEntries = data.entries.map((e) => ({ ...e, path: joinPath(dir, e.name) }));
+    if (fmDisk && fmDisk.path !== dir) fmDisk = null;
     paintFiles(id);
+    paintUsage(id);
+    if (fmPrefs.sizes) loadDisk(id, dir, fresh);
   } catch (e) {
     fmEntries = [];
     table.innerHTML = `<div class="file-row"><span class="muted">${esc(e.message)}</span></div>`;
@@ -2989,12 +3280,89 @@ async function deepSearch(id) {
   }
 }
 
+/* ------------------------------------------------------------- disk usage */
+/* Sizes of everything in the open folder, folders included — measured on the
+ * server by walking them (a world is tens of thousands of files, so it is
+ * cached for a couple of minutes), shown as bars above the table and as the
+ * size of each folder row. */
+async function loadDisk(id, dir, fresh = false) {
+  const box = $("#fm-usage");
+  if (box && (fresh || !fmDisk)) {
+    box.hidden = false;
+    box.innerHTML = `<div class="fm-usage-head"><span class="muted"><span class="spinner"></span> Measuring ${esc(dirLabel(dir))}…</span></div>`;
+  }
+  let disk;
+  try {
+    ({ disk } = await API.get(`/api/servers/${id}/disk?path=${encodeURIComponent(dir)}${fresh ? "&fresh=1" : ""}`));
+  } catch (e) {
+    if (box && fmDir === dir) box.innerHTML = `<div class="fm-usage-head"><span class="muted">${esc(e.message)}</span></div>`;
+    return;
+  }
+  if (fmDir !== dir || !fmPrefs.sizes || !$("#fm-usage")) return;
+  fmDisk = disk;
+  paintUsage(id);
+  // Folder sizes in the table — repaint only if nothing is ticked, so a
+  // selection in progress isn't thrown away by a measurement finishing.
+  if (!fmSel.size) paintFiles(id);
+  else $$("#fm-table .file-row[data-i]").forEach((row) => {
+    const e = fmRows[Number(row.dataset.i)];
+    const b = e && sizeOfEntry(e);
+    if (b != null) $(".fsize", row).textContent = fmtBytes(b);
+  });
+}
+
+function sizeOfEntry(e) {
+  if (!e.dir) return e.size;
+  if (!fmDisk || fmDeep || parentOf(e.path) !== fmDisk.path) return null;
+  const hit = fmDisk.entries.find((x) => x.name === e.name);
+  return hit ? hit.bytes : null;
+}
+
+function paintUsage(id) {
+  const box = $("#fm-usage");
+  if (!box) return;
+  if (!fmPrefs.sizes || fmDeep || !fmDisk) { if (!fmPrefs.sizes || fmDeep) box.hidden = true; return; }
+  box.hidden = false;
+  const d = fmDisk;
+  const top = d.entries.slice(0, 6);
+  const rest = d.entries.slice(6);
+  const restBytes = rest.reduce((a, e) => a + e.bytes, 0);
+  const total = Math.max(1, d.total);
+  const pct = (b) => (b / total) * 100;
+  const sys = state.sys && state.sys.disk;
+  box.innerHTML = `
+    <div class="fm-usage-head">
+      <b>${fmtBytes(d.total)}</b>
+      <span class="muted">in ${esc(dirLabel(d.path))} · measured ${fmtAgo(d.at)}${!d.path && sys && sys.total ? ` · ${fmtBytes(sys.free)} free on ${esc(sys.drive || "the drive")}` : ""}</span>
+      <button class="btn btn-sm btn-ghost" id="fm-usage-refresh" title="Measure again">${ico("rotate")}</button>
+    </div>
+    <div class="fm-usage-strip" title="Share of ${esc(dirLabel(d.path))}">
+      ${top.filter((e) => pct(e.bytes) >= 0.5).map((e, i) => `<i class="u${i}" style="width:${pct(e.bytes)}%" title="${esc(e.name)} — ${fmtBytes(e.bytes)}"></i>`).join("")}
+    </div>
+    <div class="fm-usage-rows">
+      ${top.map((e, i) => `
+        <div class="fm-usage-row ${e.dir ? "dir" : ""}" data-n="${esc(e.name)}" title="${esc(e.name)} — ${fmtBytes(e.bytes)}${e.dir ? " · open" : ""}">
+          <span class="n"><i class="sw u${i}"></i>${ico(e.dir ? "folder" : "file")} ${esc(e.name)}</span>
+          <span class="bar"><i style="width:${pct(e.bytes)}%"></i></span>
+          <span class="v mono">${fmtBytes(e.bytes)}</span>
+          <span class="p mono">${pct(e.bytes) < 1 && e.bytes ? "<1" : Math.round(pct(e.bytes))}%</span>
+        </div>`).join("")}
+      ${rest.length ? `<div class="fm-usage-row other"><span class="n">${rest.length} more</span><span class="bar"><i style="width:${pct(restBytes)}%"></i></span><span class="v mono">${fmtBytes(restBytes)}</span><span class="p mono">${Math.round(pct(restBytes))}%</span></div>` : ""}
+      ${d.entries.length ? "" : `<div class="muted" style="padding:6px 2px">Empty folder.</div>`}
+    </div>`;
+  $("#fm-usage-refresh").onclick = () => loadDisk(id, fmDir, true);
+  $$(".fm-usage-row.dir", box).forEach((r) => (r.onclick = () => renderFilesTab(id, joinPath(d.path, r.dataset.n))));
+}
+
 function paintFiles(id) {
   const table = $("#fm-table");
   if (!table) return;
   const q = fmQuery.trim().toLowerCase();
   const src = fmDeep ? fmDeep.entries : fmEntries;
-  fmRows = q ? src.filter((e) => e.name.toLowerCase().includes(q)) : src;
+  fmRows = q ? src.filter((e) => e.name.toLowerCase().includes(q)) : src.slice();
+  paintUsage(id);
+  if (fmPrefs.sort === "size")
+    fmRows.sort((a, b) => (sizeOfEntry(b) ?? -1) - (sizeOfEntry(a) ?? -1) || a.name.localeCompare(b.name));
   fmSel = new Set();
   fmAnchor = null;
 
@@ -3008,6 +3376,7 @@ function paintFiles(id) {
         <button class="btn btn-sm btn-ghost" id="fm-clear">Clear</button>
       </div>
       <button class="btn btn-sm btn-ghost" id="fm-deep" ${q && !fmDeep ? "" : "hidden"}>${ico("search")} All sub-folders ⏎</button>
+      <button class="btn btn-sm btn-ghost fm-sort" id="fm-sort" title="Change the order">Sort: ${fmPrefs.sort === "size" ? "largest first" : "name"}</button>
     </div>`;
 
   const rows = fmRows.map((e, i) => `
@@ -3016,7 +3385,7 @@ function paintFiles(id) {
       <span class="fic">${e.dir ? ico("folder") : fileIcon(e.name)}</span>
       <span class="fname ${e.dir ? "dir" : ""}" data-i="${i}">${esc(e.name)}${
         fmDeep && parentOf(e.path) !== fmDir ? `<span class="fpath">in /${esc(parentOf(e.path))}</span>` : ""}</span>
-      <span class="fsize">${e.dir ? "" : fmtBytes(e.size)}</span>
+      <span class="fsize">${sizeOfEntry(e) == null ? "" : fmtBytes(sizeOfEntry(e))}</span>
       <span class="fdel" data-i="${i}" title="Delete">${ico("trash")}</span>
     </div>`).join("");
 
@@ -3061,6 +3430,17 @@ function paintFiles(id) {
   $("#fm-del-sel").onclick = () => deleteSelection(id);
   $("#fm-move").onclick = () => moveSelection(id);
   $("#fm-deep").onclick = () => deepSearch(id);
+  $("#fm-sort").onclick = () => {
+    fmPrefs.sort = fmPrefs.sort === "size" ? "name" : "size";
+    saveFmPrefs();
+    if (fmPrefs.sort === "size" && !fmPrefs.sizes) {
+      fmPrefs.sizes = true;
+      saveFmPrefs();
+      $("#fm-sizes") && $("#fm-sizes").classList.add("on");
+      loadDisk(id, fmDir);
+    }
+    paintFiles(id);
+  };
   syncSelection();
 }
 
@@ -3068,7 +3448,7 @@ function paintFiles(id) {
 // screen, otherwise just reload the folder.
 function refreshFiles(id) {
   if (fmDeep) return deepSearch(id);
-  return loadDir(id, fmDir);
+  return loadDir(id, fmDir, true); // something changed, so the sizes did too
 }
 
 // Repaint everything that depends on the selection without rebuilding the
@@ -4314,10 +4694,30 @@ async function openSettings() {
         <div class="range-row"><input type="range" id="set-mem" min="1024" max="16384" step="512" value="${state.settings.defaultMemory || 4096}" /><span class="range-val" id="set-memv">${fmtMem(state.settings.defaultMemory || 4096)}</span></div>
       </div>
       <div class="divider"></div>
+      <div class="section-title" style="margin-top:0">Updating the panel</div>
+      <div class="switch-row">
+        <label class="switch"><input type="checkbox" id="set-keep" ${state.settings.keepServersRunning !== false ? "checked" : ""} /><i></i></label>
+        <div class="txt"><b>Keep servers running when the panel closes</b><span>Rack's ⟳ Update (or closing the panel) leaves your Minecraft servers and the playit agent running. The panel reconnects when it's back, and nobody gets kicked.</span></div>
+      </div>
+      <p class="hint" style="margin-top:8px">With this off, servers stop when the panel stops — and Rack stops the panel with a hard kill, so the world doesn't get saved. Turning it on or off applies to servers started from now on. To shut everything down, stop the servers first:</p>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <button class="btn btn-sm btn-red" id="set-stopall">${ico("stop")} Stop all servers</button>
+        <span class="muted" style="font-size:12px" id="set-running"></span>
+      </div>
+
+      <div class="divider"></div>
+      <div class="section-title" style="margin-top:0">On your phone</div>
+      ${state.lan.length
+        ? `<p class="hint" style="margin-top:0">On a phone connected to the same Wi-Fi, open:</p>
+           <div class="lan-list">${state.lan.map((u) => `<button class="addr-chip lan-chip" data-copy="${esc(u)}" title="Click to copy">${ico("globe")} <span class="mono">${esc(u)}</span></button>`).join("")}</div>
+           <p class="hint">Then use your browser's <b>Add to Home screen</b> for an app-style icon. If the page doesn't load, allow Node.js through Windows Firewall on private networks. The panel has no login, so keep it on your home network (Tailscale works well for checking in from outside).</p>`
+        : `<p class="hint" style="margin-top:0">This machine doesn't seem to be on a home network right now, so there's no address to open from a phone.</p>`}
+
+      <div class="divider"></div>
       <div class="section-title" style="margin-top:0">Public access · playit.gg</div>
       <div id="playit-section"></div>
 
-      <p class="hint" style="margin-top:22px">MC Hoster runs under the Multiapp Controller. Each Minecraft server is its own Java process managed here; this panel's own web port is assigned by the controller.</p>
+      <p class="hint" style="margin-top:22px">MC Hoster runs under Rack. Each Minecraft server is its own Java process, kept by a small host process so it survives panel restarts; this panel's own web port is assigned by Rack.</p>
     </div>
     <div class="modal-foot"><span></span><div style="display:flex;gap:10px"><button class="btn btn-ghost" data-x>Close</button><button class="btn btn-primary" id="set-save">Save</button></div></div>`);
   $(".modal-close").onclick = $("[data-x]").onclick = closeModal;
@@ -4342,9 +4742,29 @@ async function openSettings() {
       toast(e.message, "err");
     }
   };
+  $$(".lan-chip").forEach((b) => (b.onclick = () => copyText(b.dataset.copy)));
+  const running = () => [...state.servers.values()].filter((x) => ["running", "starting"].includes(x.status)).length;
+  const paintRunning = () => {
+    const el = $("#set-running");
+    if (el) el.textContent = running() ? `${running()} running` : "Nothing is running.";
+  };
+  paintRunning();
+  $("#set-stopall").onclick = async () => {
+    if (!running()) return toast("Nothing is running.", "");
+    if (!(await confirmDialog("Stop all servers?", `<p class="muted">Saves and stops every running server (${running()}). Players are disconnected.</p>`, "Stop all"))) return openSettings();
+    try {
+      const r = await API.post("/api/servers/stop-all");
+      toast(`Stopping ${r.stopped} server${r.stopped === 1 ? "" : "s"}…`, "ok");
+    } catch (e) { toast(e.message, "err"); }
+    openSettings();
+  };
   $("#set-save").onclick = async () => {
     try {
-      state.settings = await API.put("/api/settings", { javaPath: $("#set-java").value.trim() || null, defaultMemory: Number(mem.value) });
+      state.settings = await API.put("/api/settings", {
+        javaPath: $("#set-java").value.trim() || null,
+        defaultMemory: Number(mem.value),
+        keepServersRunning: $("#set-keep").checked,
+      });
       closeModal(); renderSidebar(); toast("Settings saved.", "ok");
     } catch (e) { toast(e.message, "err"); }
   };

@@ -101,6 +101,43 @@ purpose: Rack's managed-port path rewrites a process's arguments to
 `multiapp.json` is kept alongside `rack.json` so older controller installs keep
 working.
 
+### Updating without stopping your servers
+
+Rack's **⟳ Update** stops the panel (with a hard kill), pulls, and starts it
+again. That no longer stops your Minecraft servers. Each server runs under a
+small host process of its own (`lib/host.js`), started detached and with no
+living parent, so killing the panel's process tree can't reach it. The
+host holds the server's console and keeps its recent output on a local
+socket (a named pipe on Windows).
+
+When the panel starts again it reconnects to every server that is still running:
+
+- the console comes back as it was,
+- whatever the server printed while no panel was listening is read as if it had
+  just happened, so joins, leaves and chat still reach the player log,
+- the player list is checked against the server's own `list`, and players who
+  stayed on keep one continuous session,
+- autosave is turned back on if a backup was cut off halfway.
+
+The playit agent is kept the same way, so tunnels stay up and friends who
+joined through a public address aren't dropped. Servers that stopped while the
+panel was away are reported in their console.
+
+**Settings → Updating the panel** has the switch (on by default) and a **Stop
+all servers** button for when you do want everything down; with the switch
+off, servers are children of the panel again and stop with it. The first
+update *to* this version still restarts servers that were already running,
+because they were started the old way.
+
+### On your phone
+
+The panel works on a phone. Below tablet width the sidebar becomes a drawer
+behind a top bar. **Settings → On your phone** lists the address to open from
+another device on the same Wi-Fi (Windows may ask to let Node.js through the
+firewall the first time), and the browser's *Add to Home screen* gives it an
+app icon. The panel has no login, so keep it to your home network. For checking
+in from elsewhere, use a private network such as Tailscale, not a port forward.
+
 ### Standalone
 Double-click **`run.bat`** — it starts on <http://localhost:8100> and opens your
 browser. That's it. (Under Rack it never opens a browser; Rack provides links.)
@@ -261,7 +298,7 @@ modpack stays.
 - **Console** — live output, a command box (with ↑/↓ history), quick commands,
   and a live player list.
 - **Stats** — how the server is actually running: TPS, tick time, CPU,
-  memory, loaded entities, lag spikes and disk usage, with history charts.
+  memory, loaded entities and lag spikes, with interactive history charts.
   See below.
 - **Players** — the log of who has been on: sessions with times and durations,
   chat, deaths, advancements and commands. See below.
@@ -273,6 +310,9 @@ modpack stays.
   in one click, with dependencies; list, update and remove what's there.
 - **Files** — browse the server folder, upload `.jar` mods/plugins, edit
   text configs, make folders. Mods go in `mods/`, plugins in `plugins/`.
+  **Disk usage** shows what's taking the space in the open folder (click a
+  bar to go into it), folders show their size, and the list can be sorted
+  largest first.
 - **Properties** — edit `server.properties` directly.
 - **Settings** — rename, change RAM/port/max-players, custom JVM args (Aikar's
   flags), Java override, the **public address** switch, **voice chat**, the
@@ -297,12 +337,29 @@ the server is coping.
 - **Lag spikes** — every "Can't keep up! … 3120ms behind" the server prints,
   timestamped, listed, and marked on the TPS chart.
 - **This run** — start time, boot time, in-game day, Java threads.
-- **Disk usage** — what is taking the space in the server folder.
 
-Charts cover the last **15 minutes** or **hour** at 5-second resolution, or
-the last **24 hours** at one point a minute (averages, with the worst TPS of
-each minute in the tooltip). The 24-hour history and the lag log are kept in
-`data/stats/` so they survive a panel restart.
+Charts cover the last **15 minutes** or **hour** at 5-second resolution, the
+last **6** or **24 hours** at one point a minute, or the last **7 days** at one
+point every 10 minutes (averages, with the worst TPS of each in the tooltip and
+as a faint amber tick under the line). All of it, and the lag log, is kept in
+`data/stats/` so it survives a panel restart.
+
+The charts are interactive:
+
+- **Read across.** Hover over any chart, or drag a finger across it on a
+  phone, and every chart shows its value at that moment.
+- **Zoom.** Drag across a chart to zoom into that stretch; the zoom-out button
+  or a double-click goes back.
+- **Choose what you see.** Toggle each chart on or off, pick **Grid** or
+  **Large** layout, make one chart bigger, smooth noisy lines (**Light** /
+  **Heavy**), and hide the lag spike markers. These are remembered in your
+  browser.
+- **Pause** live updates to look at something without it scrolling away.
+  Readings keep being collected.
+- **CSV** downloads what the charts show.
+
+Under each chart are the min, average and max for the window. The TPS chart
+also shows how much of the window was healthy.
 
 ### Where the numbers come from
 
@@ -321,8 +378,11 @@ console, quietly — the replies never show up in the Console tab:
 | Vanilla / Fabric / Quilt, older | not available — CPU, memory and lag spikes still work |
 
 Entity counts come from `execute if entity @e` (1.13+), the in-game day from
-`time query day`. Commands a server doesn't have are dropped after the first
-"Unknown command". The questions are only asked while the server is running
+`time query day`. When a server answers one of these with "Unknown command",
+the panel checks Minecraft's echo of the failed command (`tick query<--[HERE]`)
+to be sure it was the panel's question and not something you typed. A question
+a server refuses or keeps ignoring is set aside, then asked again after 5
+minutes, doubling up to an hour. The Stats tab says when TPS is being retried. The questions are only asked while the server is running
 and awake: a paused server is left alone, and so is an empty one with
 *sleep when empty* on, so the polling never keeps it from pausing. With nobody
 online they are asked a third as often, to keep `latest.log` quiet.
@@ -482,6 +542,8 @@ MC_hoster/
 │  ├─ playit.js         playit.gg agent, account link, per-server tunnels
 │  ├─ voicechat.js      Simple Voice Chat switch: install, voice port, config
 │  ├─ manager.js        server lifecycle, console, players
+│  ├─ host.js           keeper process that holds one server across panel restarts
+│  ├─ hosted.js         the panel's side of host.js: launch, reconnect, talk
 │  ├─ perf.js           per-server TPS / CPU / memory / lag stats + history
 │  ├─ playerlog.js      durable per-server player history (sessions, chat…)
 │  ├─ sysmon.js         host CPU / RAM / disk sampling for the meters
@@ -491,7 +553,8 @@ MC_hoster/
 │  ├─ servers/<id>/     each server's folder (world, jars, mods, configs)
 │  │  └─ .mchoster/     what the panel installed from Modrinth, for this server
 │  ├─ playerlog/<id>/   that server's player history (events + roster)
-│  ├─ stats/<id>.json   that server's 24-hour stats history + lag spikes
+│  ├─ stats/<id>.json   that server's stats history (1 h / 24 h / 7 d) + lag spikes
+│  ├─ run/              live server hosts: state, last exit, host logs
 │  ├─ runtimes/         Java runtimes the panel downloaded for you
 │  └─ playit/           playit agent binary + your agent key
 ├─ rack.json            Rack manifest
