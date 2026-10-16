@@ -2,8 +2,14 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#121417" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="MC Hoster" />
     <title>MC Hoster — Minecraft Server Panel</title>
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/icon-192.png" />
     <link rel="stylesheet" href="/style.css" />
     <link
       rel="icon"
@@ -12,6 +18,12 @@
   </head>
   <body>
     <div id="app">
+      <header class="topbar">
+        <button class="tb-menu" id="tb-menu" aria-label="Menu"><span class="ic" data-ico="menu"></span></button>
+        <div class="tb-title" id="tb-title">MC&nbsp;Hoster</div>
+        <span class="tb-sum" id="tb-sum"></span>
+      </header>
+      <div class="scrim" id="scrim"></div>
       <aside class="sidebar">
         <div class="brand">
           <div class="brand-mark" id="brand-mark"></div>

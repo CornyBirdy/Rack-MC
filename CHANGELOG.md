@@ -6,6 +6,53 @@ the day the work landed.
 
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-10-16
+
+### Added
+
+- **Update without stopping your servers.** Each Minecraft server now runs
+  under a small host process of its own (`lib/host.js`) instead of being a
+  child of the panel, so Rack's ⟳ Update, closing the panel or the panel
+  crashing no longer takes the servers down. When the panel comes back it
+  reconnects to every server that is still running: the console is as it was,
+  anything printed while the panel was away (joins, leaves, chat) is caught up
+  into the player log, the player list is checked with `list`, and a player's
+  session carries on instead of being split in two. The playit agent is kept
+  the same way, so friends on a public address aren't dropped either. A switch
+  in **Settings → Updating the panel** turns this off, and **Stop all
+  servers** is there for when you do want everything down.
+- **Phone support.** Below tablet width the sidebar becomes a drawer behind a
+  top bar showing the server you're on and how many players are online; the
+  header tiles, tabs, console, file list, modals and Stats charts reflow, and
+  nothing depends on hovering. **Settings → On your phone** lists the address
+  to open on the same Wi-Fi, and the panel can be added to the home screen as
+  an app.
+- **More interactive Stats.** New 6-hour and 7-day ranges (the week is kept at
+  10-minute resolution). Hovering, or dragging a finger, over any chart shows
+  that moment on every chart at once. Drag across a chart to zoom in, then
+  zoom out or double-click to go back. Pick which charts to show, choose
+  Grid or Large layout, make one chart bigger, smooth noisy lines, hide the
+  lag spike markers, pause live updates, and download what's on screen as a
+  CSV. Each chart shows the min, average and max of the window, and the TPS
+  chart how much of it was healthy. The 15-minute and hour charts now survive
+  a panel restart too.
+- **Disk usage moved to Files**, where it belongs. A **Disk usage** button
+  shows what's taking the space in whichever folder is open, as bars you can
+  click into, and folders in the list show their size. **Sort: largest first**
+  orders the list by size.
+
+### Fixed
+
+- **TPS stopped reporting on a 26.3 Fabric server, saying it needs 1.20.3+.**
+  If a command typed into the console failed ("Unknown or incomplete
+  command") while the panel was quietly asking the server for its TPS, the
+  panel took the error as the answer to its own question, decided the server
+  couldn't report TPS, and stopped asking until the next restart. It now
+  checks Minecraft's echo of the failed command to see whose it was. And if a
+  server really does stop answering, the question is set aside for a few
+  minutes and asked again, instead of being given up on for good. The Stats
+  tab says when that is happening.
+
 ## 2026-10-14
 
 ### Added
