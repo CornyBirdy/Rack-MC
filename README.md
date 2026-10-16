@@ -335,7 +335,7 @@ the server is coping.
 - **Loaded entities** — mobs, items and the rest in loaded chunks, all
   dimensions. Thousands of dropped items is the classic cause of lag.
 - **Lag spikes** — every "Can't keep up! … 3120ms behind" the server prints,
-  timestamped, listed, and marked on the TPS chart.
+  timestamped, listed with a count for this run, and marked on the TPS chart.
 - **This run** — start time, boot time, in-game day, Java threads.
 
 Charts cover the last **15 minutes** or **hour** at 5-second resolution, the
@@ -348,15 +348,14 @@ The charts are interactive:
 
 - **Read across.** Hover over any chart, or drag a finger across it on a
   phone, and every chart shows its value at that moment.
-- **Zoom.** Drag across a chart to zoom into that stretch; the zoom-out button
-  or a double-click goes back.
-- **Choose what you see.** Toggle each chart on or off, pick **Grid** or
-  **Large** layout, make one chart bigger, smooth noisy lines (**Light** /
-  **Heavy**), and hide the lag spike markers. These are remembered in your
-  browser.
-- **Pause** live updates to look at something without it scrolling away.
-  Readings keep being collected.
-- **CSV** downloads what the charts show.
+- **Zoom.** Drag across a chart to zoom into that stretch; **Reset zoom**
+  (beside the time window) or a double-click goes back.
+- **Pause** by clicking the **● Live** pill, to look at something without it
+  scrolling away. Readings keep being collected.
+- **Charts** menu — tick which charts to show, pick **Grid** or **Large**
+  layout, smooth noisy lines (**Light** / **Heavy**), hide the lag spike
+  markers, or download what the charts show as a **CSV**. These are remembered
+  in your browser.
 
 Under each chart are the min, average and max for the window. The TPS chart
 also shows how much of the window was healthy.
