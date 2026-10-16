@@ -8,6 +8,17 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## 2026-10-16
 
+### Changed
+
+- **A calmer Stats tab.** The two rows of chart controls are now a range
+  picker, a **● Live** pill (click to pause) and one **Charts** menu holding
+  which charts to show, layout, smoothing, lag spike markers and the CSV
+  download. **Reset zoom** appears beside the time window only while zoomed,
+  the separate zoom-out button and each chart's enlarge button are gone
+  (**Large** layout covers it), and the lag spike count moved from its own
+  tile into the Lag spikes list's header. **Clear** only shows when there is
+  something to clear.
+
 ### Added
 
 - **Update without stopping your servers.** Each Minecraft server now runs
@@ -30,8 +41,8 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 - **More interactive Stats.** New 6-hour and 7-day ranges (the week is kept at
   10-minute resolution). Hovering, or dragging a finger, over any chart shows
   that moment on every chart at once. Drag across a chart to zoom in, then
-  zoom out or double-click to go back. Pick which charts to show, choose
-  Grid or Large layout, make one chart bigger, smooth noisy lines, hide the
+  reset or double-click to go back. Pick which charts to show, choose
+  Grid or Large layout, smooth noisy lines, hide the
   lag spike markers, pause live updates, and download what's on screen as a
   CSV. Each chart shows the min, average and max of the window, and the TPS
   chart how much of it was healthy. The 15-minute and hour charts now survive

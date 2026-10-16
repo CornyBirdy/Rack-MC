@@ -1754,7 +1754,7 @@ const PERF_RANGES = [
 // How the charts are shown is a preference, not per-server state: it is kept
 // in this browser and applies to every server's Stats tab.
 const PERF_PREFS_KEY = "mch.perf.prefs";
-const PERF_DEFAULT_PREFS = { range: "15m", metrics: ["tps", "mspt", "cpu", "mem", "players", "entities"], layout: "grid", smooth: "off", lag: true, big: [] };
+const PERF_DEFAULT_PREFS = { range: "15m", metrics: ["tps", "mspt", "cpu", "mem", "players", "entities"], layout: "grid", smooth: "off", lag: true };
 function perfPrefs() {
   if (!perfPrefs.v) {
     let saved = {};
@@ -1815,41 +1815,44 @@ async function renderStatsTab(id) {
       <div id="perf-note"></div>
       <div id="perf-dims"></div>
       <div class="perf-bar">
-        <h4>${ico("chart")} History</h4>
         <div class="seg" id="perf-range">
           ${PERF_RANGES.map((r) => `<button class="seg-btn ${r.id === P.range ? "on" : ""}" data-r="${r.id}" title="Last ${r.long}">${r.label}</button>`).join("")}
         </div>
         <div class="perf-bar-right">
-          <button class="btn btn-sm btn-ghost" id="perf-zoom-out" title="Zoom out">${ico("zoomout")}</button>
-          <button class="btn btn-sm" id="perf-zoom-reset" hidden title="Back to the whole range (or double-click a chart)">Reset zoom</button>
           <button class="btn btn-sm btn-ghost perf-live" id="perf-live" title="Pause or resume live updates"></button>
-          <button class="btn btn-sm btn-ghost" id="perf-csv" title="Download what the charts show as a spreadsheet">${ico("download")} CSV</button>
-        </div>
-      </div>
-      <div class="perf-opts">
-        <div class="perf-chips" id="perf-metrics" title="Which charts to show"></div>
-        <div class="perf-opt">
-          <span class="muted">Smoothing</span>
-          <div class="seg seg-sm" id="perf-smooth">
-            ${[["off", "Off"], ["light", "Light"], ["heavy", "Heavy"]].map(([k, l]) => `<button class="seg-btn ${prefs.smooth === k ? "on" : ""}" data-v="${k}">${l}</button>`).join("")}
+          <div class="perf-menu-wrap">
+            <button class="btn btn-sm btn-ghost" id="perf-menu-btn" aria-haspopup="true" aria-expanded="false" title="Chart options">${ico("sliders")}<span class="perf-menu-l"> Charts</span></button>
+            <div class="perf-menu" id="perf-menu" hidden>
+              <div class="pm-sec">
+                <div class="pm-h">Show</div>
+                <div id="perf-metrics" class="pm-checks"></div>
+              </div>
+              <div class="pm-row">
+                <span>Layout</span>
+                <div class="seg seg-sm" id="perf-layout">
+                  ${[["grid", "Grid"], ["list", "Large"]].map(([k, l]) => `<button class="seg-btn ${prefs.layout === k ? "on" : ""}" data-v="${k}">${l}</button>`).join("")}
+                </div>
+              </div>
+              <div class="pm-row">
+                <span>Smoothing</span>
+                <div class="seg seg-sm" id="perf-smooth">
+                  ${[["off", "Off"], ["light", "Light"], ["heavy", "Heavy"]].map(([k, l]) => `<button class="seg-btn ${prefs.smooth === k ? "on" : ""}" data-v="${k}">${l}</button>`).join("")}
+                </div>
+              </div>
+              <label class="pm-row pm-check"><span>Lag spike markers</span><input type="checkbox" id="perf-lagmarks" ${prefs.lag ? "checked" : ""}/></label>
+              <button class="pm-item" id="perf-csv">${ico("download")} Download as CSV</button>
+              <p class="pm-hint">Drag across a chart to zoom in on that stretch; double-click to zoom back out.</p>
+            </div>
           </div>
         </div>
-        <div class="perf-opt">
-          <span class="muted">Layout</span>
-          <div class="seg seg-sm" id="perf-layout">
-            ${[["grid", "Grid"], ["list", "Large"]].map(([k, l]) => `<button class="seg-btn ${prefs.layout === k ? "on" : ""}" data-v="${k}">${l}</button>`).join("")}
-          </div>
-        </div>
-        <label class="perf-opt perf-check"><input type="checkbox" id="perf-lagmarks" ${prefs.lag ? "checked" : ""}/> <span>Lag spike markers</span></label>
       </div>
-      <div class="perf-window muted" id="perf-window"></div>
+      <div class="perf-window muted"><span id="perf-window"></span><button class="link-btn" id="perf-zoom-reset" hidden title="Back to the whole range (or double-click a chart)">Reset zoom</button></div>
       <div class="perf-charts ${prefs.layout === "list" ? "list" : ""}" id="perf-charts"></div>
-      <p class="hint perf-howto">Hover (or drag a finger) over a chart to read every chart at that moment. Drag across a chart with the mouse to zoom in on that stretch; double-click to zoom back out.</p>
       <div class="perf-lower">
         <section class="plog-pane">
           <header class="plog-pane-head">
-            <h4>${ico("alert")} Lag spikes</h4>
-            <div class="plog-tools"><button class="btn btn-sm btn-ghost" id="perf-lag-clear" title="Forget recorded lag spikes">${ico("trash")} Clear</button></div>
+            <h4 title="&quot;Can't keep up!&quot; warnings from the server — moments it fell seconds behind.">${ico("alert")} Lag spikes <span class="muted" id="perf-lag-run"></span></h4>
+            <div class="plog-tools"><button class="btn btn-sm btn-ghost" id="perf-lag-clear" hidden title="Forget recorded lag spikes">${ico("trash")} Clear</button></div>
           </header>
           <div id="perf-lag" class="perf-lag"></div>
         </section>
@@ -1884,8 +1887,8 @@ async function renderStatsTab(id) {
     perfPaintCharts(id);
   };
   $("#perf-zoom-reset").onclick = () => { P.view = null; perfPaintCharts(id); };
-  $("#perf-zoom-out").onclick = () => perfZoomOut(id);
-  $("#perf-csv").onclick = () => perfDownloadCsv(id);
+  $("#perf-csv").onclick = () => { perfMenu(false); perfDownloadCsv(id); };
+  $("#perf-menu-btn").onclick = () => perfMenu($("#perf-menu").hidden);
   $("#perf-lag-clear").onclick = async () => {
     if (!(await confirmDialog("Clear lag spikes?", "<p class='muted'>Forgets the recorded “Can't keep up!” warnings for this server. Charts are kept.</p>", "Clear"))) return;
     try { await API.del(`/api/servers/${id}/stats/lag`); if (P.data) P.data.lag = []; perfPaint(id); } catch (e) { toast(e.message, "err"); }
@@ -1903,18 +1906,34 @@ async function renderStatsTab(id) {
   await perfLoad(id);
 }
 
+// The chart options live in one menu so the toolbar stays a range picker and
+// a live switch. A click anywhere else, or Escape, closes it.
+function perfMenu(open) {
+  const menu = $("#perf-menu"), btn = $("#perf-menu-btn");
+  if (perfMenu.off) { perfMenu.off(); perfMenu.off = null; }
+  if (!menu) return;
+  menu.hidden = !open;
+  btn.setAttribute("aria-expanded", String(open));
+  btn.classList.toggle("on", open);
+  if (!open) return;
+  const away = (e) => { if (!e.target.closest(".perf-menu-wrap")) perfMenu(false); };
+  const key = (e) => { if (e.key === "Escape") perfMenu(false); };
+  document.addEventListener("pointerdown", away);
+  document.addEventListener("keydown", key);
+  perfMenu.off = () => { document.removeEventListener("pointerdown", away); document.removeEventListener("keydown", key); };
+}
+
 function perfPaintMetricChips(id) {
   const box = $("#perf-metrics");
   if (!box) return;
   const on = new Set(perfPrefs().metrics);
   box.innerHTML = perfCharts(id).map((c) =>
-    `<button class="fchip ${on.has(c.key) ? "on" : "off"}" data-k="${c.key}" title="${on.has(c.key) ? "Hide" : "Show"} ${esc(c.title)}">${esc(c.title)}</button>`).join("");
-  $$(".fchip", box).forEach((b) => (b.onclick = () => {
+    `<label class="pm-check"><input type="checkbox" data-k="${c.key}" ${on.has(c.key) ? "checked" : ""}/> <span>${esc(c.title)}</span></label>`).join("");
+  $$("input", box).forEach((b) => (b.onchange = () => {
     const keys = new Set(perfPrefs().metrics);
-    if (keys.has(b.dataset.k)) keys.delete(b.dataset.k); else keys.add(b.dataset.k);
+    if (b.checked) keys.add(b.dataset.k); else keys.delete(b.dataset.k);
     // Keep the order the charts are defined in, whatever order they were ticked.
     savePerfPrefs({ metrics: perfCharts(id).map((c) => c.key).filter((k) => keys.has(k)) });
-    perfPaintMetricChips(id);
     perfPaintCharts(id, true);
   }));
 }
@@ -2015,10 +2034,10 @@ function perfPaintTiles(id) {
     perfTile("Entities", live && st.entities != null ? fmtNum(st.entities) : "—", "loaded, all dimensions",
       { title: "Mobs, items, minecarts… everything with a position in loaded chunks. Thousands of dropped items or mobs in a farm is the classic cause of lag." }),
     perfTile("Players", `${players}<small> / ${s.maxPlayers || 20}</small>`, up ? `peak ${Math.max(st.peakPlayers || 0, players)} this run` : "server offline"),
-    perfTile("Lag spikes", up ? fmtNum(st.lagCount || 0) : "—",
-      st.lagLast ? `${(st.lagLast.ms / 1000).toFixed(1)} s behind, ${fmtAgo(st.lagLast.t)}` : up ? "none this run" : "server offline",
-      { title: "\"Can't keep up!\" warnings from the server — moments it fell seconds behind." }),
   ].join("");
+
+  const lagRun = $("#perf-lag-run");
+  if (lagRun) lagRun.textContent = up ? `${fmtNum(st.lagCount || 0)} this run` : "";
 
   const note = $("#perf-note");
   if (note) {
@@ -2093,28 +2112,20 @@ function perfPaintCharts(id, rebuild = false) {
   if (!box || !P.data) return;
   const prefs = perfPrefs();
   const charts = perfCharts(id).filter((c) => prefs.metrics.includes(c.key));
-  const big = new Set(prefs.big || []);
-  const want = charts.map((c) => c.key + (big.has(c.key) ? "+" : "")).join(",");
+  const want = charts.map((c) => c.key).join(",");
   if (rebuild || box.dataset.keys !== want) {
     box.dataset.keys = want;
     box.innerHTML = charts.length ? charts.map((c) => `
-      <div class="perf-chart ${big.has(c.key) ? "big" : ""}" data-k="${c.key}">
+      <div class="perf-chart" data-k="${c.key}">
         <div class="pc-head">
           <span class="pc-title">${c.title}</span>
           ${c.lag && prefs.lag ? `<span class="pc-key"><i class="lag-key"></i>lag spike</span>` : ""}
           <b class="pc-now"></b>
-          <button class="pc-btn" data-big="${c.key}" title="${big.has(c.key) ? "Make smaller" : "Make bigger"}">${ico(big.has(c.key) ? "shrink" : "expand")}</button>
         </div>
         <div class="pc-plot"><svg></svg><div class="pc-tip" hidden></div></div>
         <div class="pc-sum"></div>
       </div>`).join("")
-      : `<div class="players-empty">No charts picked — choose some above.</div>`;
-    $$(".pc-btn[data-big]", box).forEach((b) => (b.onclick = () => {
-      const set = new Set(perfPrefs().big || []);
-      if (set.has(b.dataset.big)) set.delete(b.dataset.big); else set.add(b.dataset.big);
-      savePerfPrefs({ big: [...set] });
-      perfPaintCharts(id, true);
-    }));
+      : `<div class="players-empty">No charts picked — choose some under Charts.</div>`;
   }
 
   const win = perfWindow(P);
@@ -2126,18 +2137,17 @@ function perfPaintCharts(id, rebuild = false) {
     const card = $(`.perf-chart[data-k="${c.key}"]`, box);
     if (!card) continue;
     const pts = c.step ? all : perfSmooth(all, c.key, prefs.smooth, step);
-    drawPerfChart(id, card, c, pts, all, { ...win, step, lag: c.lag ? lag : null, H: card.classList.contains("big") ? Math.round(H * 1.6) : H });
+    drawPerfChart(id, card, c, pts, all, { ...win, step, lag: c.lag ? lag : null, H });
   }
 
   // Toolbar state follows the window.
   const range = PERF_RANGES.find((r) => r.id === P.range);
   const reset = $("#perf-zoom-reset");
   if (reset) reset.hidden = !win.zoomed;
-  const zo = $("#perf-zoom-out");
-  if (zo) zo.disabled = !win.zoomed;
   const live = $("#perf-live");
   if (live) {
-    live.innerHTML = P.frozenAt ? `${ico("play")} Resume` : `<i class="live-dot"></i> Live`;
+    live.innerHTML = P.frozenAt ? `${ico("pause")} Paused` : `<i class="live-dot"></i> Live`;
+    live.title = P.frozenAt ? "Paused — click to resume live updates" : "Live — click to pause";
     live.classList.toggle("paused", !!P.frozenAt);
   }
   const wl = $("#perf-window");
@@ -2145,7 +2155,6 @@ function perfPaintCharts(id, rebuild = false) {
     const parts = [`${fmtWhen(win.x0)} → ${win.zoomed || P.frozenAt ? fmtWhen(win.x1) : "now"}`];
     parts.push(step >= 600000 ? "10-minute averages" : step >= 60000 ? "1-minute averages" : "every 5 s");
     if (win.zoomed) parts.push(`zoomed in on ${fmtSpan(win.x1 - win.x0)} of the last ${range.long}`);
-    if (P.frozenAt) parts.push("paused — new readings are kept but not drawn");
     wl.textContent = parts.join(" · ");
   }
 }
@@ -2155,23 +2164,6 @@ function fmtSpan(ms) {
   if (ms < 7200000) return Math.round(ms / 60000) + " min";
   if (ms < 172800000) return (ms / 3600000).toFixed(ms < 36000000 ? 1 : 0) + " h";
   return (ms / 86400000).toFixed(1) + " days";
-}
-
-function perfZoomOut(id) {
-  const P = perfState(id);
-  if (!P.view) return;
-  const range = PERF_RANGES.find((r) => r.id === P.range);
-  const end = P.frozenAt || Date.now();
-  const mid = (P.view.x0 + P.view.x1) / 2;
-  const span = (P.view.x1 - P.view.x0) * 2;
-  if (span >= range.span * 0.95) P.view = null;
-  else {
-    let x1 = Math.min(end, mid + span / 2);
-    let x0 = Math.max(end - range.span, x1 - span);
-    x1 = x0 + span;
-    P.view = { x0, x1 };
-  }
-  perfPaintCharts(id);
 }
 
 // Every chart shares one crosshair: pointing at a moment on any of them shows
@@ -2392,6 +2384,8 @@ function perfPaintLag(id) {
   const P = perfState(id);
   if (!box || !P.data) return;
   const lag = P.data.lag || [];
+  const clear = $("#perf-lag-clear");
+  if (clear) clear.hidden = !lag.length;
   box.innerHTML = lag.length
     ? `<div class="perf-lag-list">${lag.slice(0, 60).map((l) => `
         <div class="perf-lag-row">
