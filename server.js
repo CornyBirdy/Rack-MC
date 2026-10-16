@@ -44,7 +44,23 @@ const MIME = {
   ".json": "application/json; charset=utf-8",
   ".svg": "image/svg+xml",
   ".ico": "image/x-icon",
+  ".png": "image/png",
+  ".webmanifest": "application/manifest+json",
 };
+
+// Addresses another device on the network (a phone, say) can open the panel
+// at. Only private IPv4 ranges: the panel has no login, so it is offered for
+// the home network and nothing wider.
+function lanUrls() {
+  const out = [];
+  for (const list of Object.values(os.networkInterfaces()))
+    for (const a of list || []) {
+      if (a.internal || (a.family !== "IPv4" && a.family !== 4)) continue;
+      if (!/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/.test(a.address)) continue;
+      out.push(`http://${a.address}:${PORT}`);
+    }
+  return out;
+}
 
 function sendJSON(res, code, obj) {
   const body = JSON.stringify(obj);
@@ -225,6 +241,7 @@ const server = http.createServer(async (req, res) => {
         settings: store.getSettings(),
         defaults: { quickCommands: store.DEFAULT_QUICK_COMMANDS },
         build: changelog.stamp(),
+        lan: lanUrls(),
         javas,
         playit: playit.snapshot(),
         sys: sysmon.snapshot(),
@@ -371,6 +388,7 @@ const server = http.createServer(async (req, res) => {
       const patch = {};
       if ("javaPath" in body) patch.javaPath = body.javaPath || null;
       if ("defaultMemory" in body) patch.defaultMemory = Number(body.defaultMemory) || 4096;
+      if ("keepServersRunning" in body) patch.keepServersRunning = !!body.keepServersRunning;
       // null means "put the stock buttons back".
       if ("quickCommands" in body)
         patch.quickCommands = body.quickCommands === null
@@ -382,6 +400,10 @@ const server = http.createServer(async (req, res) => {
     // ---- servers collection ----
     if (p === "/api/servers" && req.method === "GET")
       return sendJSON(res, 200, { servers: manager.listSummaries() });
+
+    // Settings → "Stop all servers": every running server, gracefully.
+    if (p === "/api/servers/stop-all" && req.method === "POST")
+      return sendJSON(res, 200, manager.stopAll());
 
     if (p === "/api/servers" && req.method === "POST")
       return guard(async () => {
@@ -541,8 +563,12 @@ const server = http.createServer(async (req, res) => {
           lag: manager.perf.lagEvents(id).slice(0, 100),
           host: { cores: os.cpus().length, totalMB: Math.round(os.totalmem() / 1048576) },
         });
-      if (action === "stats" && parts[4] === "disk" && req.method === "GET")
-        return guard(async () => sendJSON(res, 200, { disk: await manager.perf.diskUsage(id) }))(req, res);
+      // What is taking the space in a folder of the server (the root by
+      // default) — the Files tab's sizes. /stats/disk is the old name.
+      if ((action === "disk" || (action === "stats" && parts[4] === "disk")) && req.method === "GET")
+        return guard(async () =>
+          sendJSON(res, 200, { disk: await manager.perf.diskUsage(id, q.get("path") || "", { fresh: q.get("fresh") === "1" }) })
+        )(req, res);
       if (action === "stats" && parts[4] === "lag" && req.method === "DELETE") {
         manager.perf.clearLag(id);
         return sendJSON(res, 200, { ok: true });
@@ -707,9 +733,17 @@ const server = http.createServer(async (req, res) => {
   });
 });
 
-server.listen(PORT, () => {
+server.listen(PORT, async () => {
   const url = `http://localhost:${PORT}`;
   console.log(`MC Hoster running at ${url}  (${store.all().length} server(s) configured)`);
+  for (const lan of lanUrls()) console.log(`  on your network: ${lan}`);
+  // Servers that kept running while the panel was away come first: they must
+  // not be started a second time, nor have a wake listener parked on their port.
+  try {
+    await manager.adoptAll();
+  } catch (e) {
+    console.error("[adopt]", e && e.message);
+  }
   manager.initWake(); // stopped servers that want waking need their port held
   manager.autostart().catch((e) => console.error("[autostart]", e && e.message));
   // Only auto-open a browser when launched standalone. Rack captures this
@@ -723,8 +757,12 @@ function isWin() {
 }
 
 /* --------------------------------------------------------- graceful shutdown */
+// With "keep servers running" on (the default), servers and the playit agent
+// are only let go of here — they live on under their hosts until the next
+// panel picks them up. Rack's update kills the panel outright and never gets
+// this far, which is fine for the same reason.
 function shutdown() {
-  playit.stopAgent();
+  playit.releaseAgent();
   playerlog.flushAll(); // history batched in memory would otherwise go with us
   manager.perf.flushAll(); // so the 24-hour charts survive a panel restart
   manager.closeWakeListeners().catch(() => {});
