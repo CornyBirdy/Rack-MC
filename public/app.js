@@ -2517,10 +2517,19 @@ async function renderContentTab(id) {
           <input type="text" id="md-filter" placeholder="Filter installed…" autocomplete="off" spellcheck="false" />
           <button class="fm-x" id="md-filter-clear" title="Clear filter" hidden>×</button>
         </div>
+        <button class="btn btn-sm" id="md-add" title="Add .${content.folder === "datapacks" ? "zip" : "jar"} files from your computer — or drag them onto the list">${ico("upload")} Add files</button>
+        <input type="file" id="md-file" multiple accept="${content.folder === "datapacks" ? ".zip,.jar" : ".jar"}" hidden />
         <button class="btn btn-sm" id="md-upd">↻ Check for updates</button>
       </div>
     </div>
-    <div id="md-installed"></div>
+    <div class="fm-prog" id="md-prog" hidden>
+      <div class="fm-prog-track"><i id="md-prog-fill"></i></div>
+      <span class="fm-prog-text" id="md-prog-text"></span>
+    </div>
+    <div class="fm-drop md-drop" id="md-drop">
+      <div id="md-installed"></div>
+      <div class="fm-drop-veil"><span>Drop to add to ${esc(content.folder === "datapacks" ? "world/datapacks" : content.folder)}/</span></div>
+    </div>
 
     <div class="divider"></div>
     <div class="mods-head">
@@ -2555,6 +2564,13 @@ async function renderContentTab(id) {
   q.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); clearTimeout(timer); browse(id, 0); } };
   $("#md-sort").onchange = () => browse(id, 0);
   $("#md-upd").onclick = () => checkUpdates(id);
+  $("#md-add").onclick = () => $("#md-file").click();
+  $("#md-file").onchange = (e) => {
+    const files = [...e.target.files];
+    e.target.value = "";
+    uploadContent(id, files);
+  };
+  wireContentDrop(id);
 
   // Filtering what is already installed is a local matter — the list is
   // already in hand, so it narrows on every keystroke with no request.
@@ -2672,7 +2688,7 @@ function paintInstalled(id) {
       <span class="fic">${it.icon ? `<img class="md-ic" src="${esc(it.icon)}" alt="" loading="lazy" />` : ico("layers")}</span>
       <span class="fname">
         <a href="https://modrinth.com/project/${esc(it.slug)}" target="_blank" rel="noopener">${esc(it.title)}</a>
-        <span class="muted">${esc(it.versionNumber || it.file.split("/").pop())}${it.fromPack ? " · from the modpack" : it.dependency ? " · dependency" : ""} · ${fmtBytes(it.size)}</span>
+        <span class="muted">${esc(it.versionNumber || it.file.split("/").pop())}${it.fromPack ? " · from the modpack" : it.dependency ? " · dependency" : it.adopted ? " · added by hand" : ""} · ${fmtBytes(it.size)}</span>
       </span>
       <span class="md-upd-slot" data-project="${esc(it.projectId)}">${updateButtonHTML(state.mdUpdates && state.mdUpdates.get(it.projectId))}</span>
       <span class="fdel" data-del="${esc(it.file)}" title="Remove">${ico("trash")}</span>
@@ -2681,7 +2697,7 @@ function paintInstalled(id) {
   const loose = unmanaged.map((u) => `
     <div class="file-row">
       <span class="fic">${ico("file")}</span>
-      <span class="fname">${esc(u.name)} <span class="muted">added by hand · ${fmtBytes(u.size)}</span></span>
+      <span class="fname">${esc(u.name)} <span class="muted">added by hand${u.notOnModrinth ? " · not on Modrinth" : ""} · ${fmtBytes(u.size)}</span></span>
       <span class="fdel" data-del="${esc(u.file)}" title="Remove">${ico("trash")}</span>
     </div>`).join("");
 
@@ -2689,7 +2705,7 @@ function paintInstalled(id) {
     ? `<div class="file-table">${packRow}${rows}${loose}</div>`
     : q
       ? `<div class="pk-empty">Nothing installed matches “${esc(state.mdQuery.trim())}”.</div>`
-      : `<div class="pk-empty">Nothing installed yet — search below to add some.</div>`;
+      : `<div class="pk-empty">Nothing installed yet — search below, or drop .${data.folder === "datapacks" ? "zip" : "jar"} files here.</div>`;
 
   bindModrinthLinks(box);
   $$(".md-upd-slot [data-up]", box).forEach((b) => (b.onclick = (ev) =>
@@ -2705,6 +2721,85 @@ function paintInstalled(id) {
       loadInstalled(id);
     } catch (e) { toast(e.message, "err"); }
   }));
+}
+
+/* Dropping jars onto the installed list (or "Add files") puts them in the
+ * content folder. The server looks each one up on Modrinth by its hash, so a
+ * jar downloaded from there shows with its icon and can be updated later. */
+function wireContentDrop(id) {
+  guardWindowDrops();
+  const zone = $("#md-drop");
+  let depth = 0;
+  const carriesFiles = (e) => [...(e.dataTransfer?.types || [])].includes("Files");
+  zone.addEventListener("dragenter", (e) => {
+    if (!carriesFiles(e)) return;
+    e.preventDefault();
+    depth++;
+    zone.classList.add("dropping");
+  });
+  zone.addEventListener("dragover", (e) => {
+    if (!carriesFiles(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+  });
+  zone.addEventListener("dragleave", (e) => {
+    if (!carriesFiles(e)) return;
+    if (--depth <= 0) { depth = 0; zone.classList.remove("dropping"); }
+  });
+  zone.addEventListener("drop", (e) => {
+    if (!carriesFiles(e)) return;
+    e.preventDefault();
+    depth = 0;
+    zone.classList.remove("dropping");
+    uploadContent(id, [...(e.dataTransfer.files || [])]);
+  });
+}
+
+async function uploadContent(id, files) {
+  const s = state.servers.get(id);
+  const content = s && s.content;
+  if (!content || !files.length) return;
+  const okExt = content.folder === "datapacks" ? /\.(zip|jar)$/i : /\.jar$/i;
+  const wrong = files.filter((f) => !okExt.test(f.name));
+  files = files.filter((f) => okExt.test(f.name));
+  if (wrong.length)
+    toast(`Skipped ${wrong.map((f) => f.name).slice(0, 3).join(", ")}${wrong.length > 3 ? "…" : ""} — only ${content.folder === "datapacks" ? ".zip/.jar" : ".jar"} files go here.`, "err");
+  if (!files.length) return;
+
+  const prog = $("#md-prog");
+  const show = (done, label) => {
+    if (!prog) return;
+    prog.hidden = false;
+    $("#md-prog-fill").style.width = ((done / files.length) * 100).toFixed(1) + "%";
+    $("#md-prog-text").textContent = `Adding ${done} of ${files.length} · ${label}`;
+  };
+  let known = 0, running = false;
+  const replaced = [];
+  const errors = [];
+  show(0, "starting…");
+  for (let i = 0; i < files.length; i++) {
+    const f = files[i];
+    try {
+      const r = await fetch(`/api/servers/${id}/content/upload?name=${encodeURIComponent(f.name)}`, { method: "POST", body: f });
+      const out = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(out.error || `HTTP ${r.status}`);
+      if (out.item) known++;
+      if (out.replaced) replaced.push(out.replaced.split("/").pop());
+      running = running || out.running;
+    } catch (e) {
+      errors.push(`${f.name}: ${e.message}`);
+    }
+    show(i + 1, f.name);
+  }
+  if (prog) prog.hidden = true;
+  const added = files.length - errors.length;
+  if (added)
+    toast(`Added ${added} file${added === 1 ? "" : "s"}` +
+      (known ? ` — ${known === added ? (added === 1 ? "it's" : "all") : known} recognised on Modrinth` : "") +
+      (replaced.length ? `, replacing ${replaced.slice(0, 2).join(", ")}${replaced.length > 2 ? "…" : ""}` : "") +
+      (running ? ". Restart to apply." : "."), "ok");
+  if (errors.length) toast(errors.slice(0, 2).join(" · ") + (errors.length > 2 ? ` (+${errors.length - 2} more)` : ""), "err");
+  loadInstalled(id);
 }
 
 async function browse(id, offset) {
@@ -3150,7 +3245,7 @@ function guardWindowDrops() {
   fmWindowGuard = true;
   for (const ev of ["dragover", "drop"])
     window.addEventListener(ev, (e) => {
-      if (!e.target.closest || !e.target.closest("#fm-drop")) e.preventDefault();
+      if (!e.target.closest || !e.target.closest("#fm-drop, #md-drop")) e.preventDefault();
     });
 }
 

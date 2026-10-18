@@ -586,8 +586,28 @@ const server = http.createServer(async (req, res) => {
 
       // ---- Modrinth content (mods / plugins / datapacks) ----
       // What this server can run, and what it already has installed.
+      // Jars added by hand are looked up on Modrinth first (by hash), so ones
+      // downloaded from there get their name, icon and update checks. A slow
+      // or unreachable Modrinth only delays the list a little.
       if (action === "content" && !parts[4] && req.method === "GET")
-        return guard(async () => sendJSON(res, 200, modrinth.installed(store.dirFor(id), def)))(req, res);
+        return guard(async () => {
+          const dir = store.dirFor(id);
+          await Promise.race([
+            modrinth.adopt(dir, def).catch(() => {}),
+            new Promise((r) => setTimeout(r, 6000)),
+          ]);
+          sendJSON(res, 200, modrinth.installed(dir, def));
+        })(req, res);
+
+      // POST /api/servers/:id/content/upload?name=foo.jar  (raw body)
+      // A jar dropped on the content tab: saved into mods/ (or plugins/, …)
+      // and recognised on Modrinth when it came from there.
+      if (action === "content" && parts[4] === "upload" && req.method === "POST")
+        return guard(async () => {
+          const buf = await readRawBody(req);
+          const out = await modrinth.upload(store.dirFor(id), def, q.get("name") || "", buf);
+          sendJSON(res, 200, { ...out, running: manager.slot(id).status === "running" });
+        })(req, res);
 
       // POST /api/servers/:id/content {versionId} | {projectId}
       // Progress lines ride the install event bus so the console tab shows the

@@ -6,6 +6,24 @@ the day the work landed.
 
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-10-18
+
+### Added
+
+- **Drag jars onto the Mods tab.** Drop `.jar` files (or `.zip` datapacks on
+  a vanilla server) onto the installed list, or use **Add files**, and they go
+  straight into `mods/` (`plugins/`, `datapacks/`). Anything else in the drop
+  is skipped and named. A dropped jar that's a newer build of a mod already
+  installed replaces the old one, since two copies stop the server starting.
+- **Jars from Modrinth are recognised.** A jar you downloaded from Modrinth
+  yourself and dropped in (on the tab or in Files) used to show as a nameless
+  "added by hand" file with no icon and no updates. The panel now looks each
+  one up on Modrinth by its SHA-1 — one request for the whole folder — and the
+  ones Modrinth knows get their name, icon, version and **Check for updates**
+  like anything installed from the panel. Only files Modrinth genuinely
+  doesn't know say "not on Modrinth", and those aren't asked about again for
+  a day.
+
 ## 2026-10-16
 
 ### Changed

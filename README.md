@@ -79,7 +79,14 @@ and remove things later. A modpack's own mods are recorded there too — by name
 not filename — so you can update or drop individual mods out of a pack.
 **Check for updates** compares everything in one request (Modrinth answers for a
 whole folder of file hashes at once) and offers a one-click update per mod.
-Anything you dropped into `mods/` by hand still shows up, labelled as such.
+
+Jars can also come from your computer: drag them onto the installed list (or
+**Add files**). Anything that lands in `mods/` by hand — dropped on the tab, in
+the Files tab, or copied in outside the panel — is looked up on Modrinth by its
+SHA-1 when the tab opens, so a jar downloaded from a Modrinth page gets its
+name, icon and update checks as if the panel had installed it. Dropping a newer
+build of a mod you already have replaces the old jar. Files Modrinth doesn't
+know (your own builds, CurseForge-only mods) stay listed as "added by hand".
 
 Content installs while the server is running are fine; the panel reminds you to
 restart to apply them.
