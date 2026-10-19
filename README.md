@@ -325,6 +325,42 @@ modpack stays.
   flags), Java override, the **public address** switch, **voice chat**, the
   two **sleep** switches, the three **auto-restart** switches, **scheduled
   uptime**, or delete the server.
+- **Duplicate** — the copy button beside Start (or **Settings → Duplicate**)
+  makes a new server from this one. See below.
+
+## Duplicating a server
+
+Handy for a test copy before updating mods, a creative copy of a survival
+world, or a second server on the same modpack with a fresh map. The dialog
+picks a name and a free port, and lets you choose what comes along:
+
+| Part | What it is |
+|---|---|
+| **World** | the level folder from `server.properties`, with its Nether and End (and, on vanilla, its datapacks) |
+| **Mods** / **Plugins** | everything in `mods/` or `plugins/` — plugin settings live in there too |
+| **Configs** | `server.properties`, `config/`, `defaultconfigs/` and loose `.yml`/`.toml`/`.properties` files |
+| **Player lists** | ops, whitelist, bans and the name cache |
+
+Quick picks set the usual mixes: **Everything**, **World only**, **Mods, fresh
+world** and **Fresh start**. Each part shows its size. The server software (the
+jars, libraries and loader files) is always copied, so the new server starts
+without installing anything.
+
+- Logs, crash reports, backups, stats and player history stay with the
+  original. So do its public address, scheduled uptime and *start with panel*,
+  because two servers sharing a tunnel or starting together is never what you
+  meant. RAM, JVM args, sleep and restart settings and automatic backups are
+  copied.
+- Copying a modded world **without** its mods brings up a warning: opening the
+  world without them deletes their blocks and items from the copy.
+- Leave configs behind and the copy gets a fresh `server.properties`, still
+  pointing at the copied world if it has a different name. A modpack copied
+  without its mods stops calling itself that pack.
+- A running server can be copied. If the world is included, it is saved first
+  and autosave is paused until the copy has it (as for a backup), so players
+  stay connected. While the copy runs, the original can't be started, restored
+  or deleted.
+- The copy shows as *Installing*, with its progress on its console.
 
 ## Server stats
 
@@ -580,6 +616,8 @@ MC_hoster/
 │  ├─ playit.js         playit.gg agent, account link, per-server tunnels
 │  ├─ voicechat.js      Simple Voice Chat switch: install, voice port, config
 │  ├─ manager.js        server lifecycle, console, players
+│  ├─ backup.js         world / full backups, restores, the backup schedule
+│  ├─ duplicate.js      copy a server, choosing world / mods / configs / players
 │  ├─ host.js           keeper process that holds one server across panel restarts
 │  ├─ hosted.js         the panel's side of host.js: launch, reconnect, talk
 │  ├─ uptime.js         scheduled uptime: opening-hours windows and their edges
