@@ -20,6 +20,18 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   An edge that passed while the panel was closed is acted on when it comes
   back.
 
+### Changed
+
+- **New look: the Rack Suite "Sunset" palette.** The panel now shares Rack's
+  colours: dark graphite with one periwinkle accent for primary buttons, the
+  selected server, focus and switches, and pink and orange for chart series.
+  There is a **light theme** too — **Theme** at the bottom of the sidebar
+  switches it, and this browser remembers the choice. Every status reads in
+  words and an icon as well as colour (● Online, ○ Offline, ⚠ Crashed,
+  ‖ Paused, ☾ Sleeping; ✓ Healthy / ⚠ Lagging; "⚠ High" on a busy CPU, RAM or
+  disk meter), buttons and fields are a steady 32px high (44px on touch), and
+  the console stays dark in both themes.
+
 ## 2026-10-18
 
 ### Added

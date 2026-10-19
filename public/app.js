@@ -119,8 +119,12 @@ function viewStatus(s) {
   return s.status;
 }
 const statusLabel = (s) => STATUS_LABEL[viewStatus(s)] || viewStatus(s);
-// Online and paused both mean "the process is up" — worth a leading dot.
-const statusDot = (s) => (viewStatus(s) === "running" || viewStatus(s) === "paused" ? "● " : "");
+// Every status leads with its own icon, so none of them is told apart by colour alone.
+const STATUS_ICON = {
+  running: "● ", stopped: "○ ", starting: "◌ ", stopping: "◌ ", installing: "◌ ",
+  "install-failed": "⚠ ", crashed: "⚠ ", paused: "‖ ", asleep: "☾ ",
+};
+const statusDot = (s) => STATUS_ICON[viewStatus(s)] || "";
 
 /*
  * Range inputs are painted by hand. Chrome keeps the unfilled half of a native
@@ -277,12 +281,26 @@ async function confirmDialog(title, body, okText = "Confirm", danger = true) {
   });
 }
 
+/* -------------------------------------------------------------------- theme */
+// Dark is the default; a light choice is remembered per browser. index.html
+// applies it before first paint, this keeps the label and toolbar colour in step.
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  try { localStorage.setItem("theme", theme); } catch {}
+  $("#nav-theme-label").textContent = `Theme: ${theme}`;
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.content = theme === "light" ? "#eceef5" : "#111217";
+}
+
 /* ---------------------------------------------------------------- bootstrap */
 async function boot() {
   // The shell in index.html carries data-ico placeholders; fill them before
   // anything else so the sidebar never flashes empty boxes.
   $("#brand-mark").innerHTML = ico("cube");
   hydrateIcons();
+  applyTheme(document.documentElement.dataset.theme === "light" ? "light" : "dark");
+  $("#nav-theme").onclick = () =>
+    applyTheme(document.documentElement.dataset.theme === "light" ? "dark" : "light");
 
   try {
     const b = await API.get("/api/bootstrap");
@@ -753,7 +771,7 @@ async function openCreateWizard() {
     next.disabled = true;
     body.innerHTML = stepsBar() + `
       <div class="form-row">
-        <label>Minecraft version — <span class="mono" style="color:var(--accent-2)">${esc(loader.label)}</span></label>
+        <label>Minecraft version — <span class="mono" style="color:var(--accent-text)">${esc(loader.label)}</span></label>
         <div id="mc-area"><span class="spinner"></span> <span class="muted">Fetching versions…</span></div>
         ${wiz.loader === "vanilla" || wiz.loader === "fabric" || wiz.loader === "quilt"
           ? `<label style="display:flex;align-items:center;gap:8px;margin-top:10px;font-weight:400;cursor:pointer"><input type="checkbox" id="snap" style="width:auto" ${wiz.showSnapshots ? "checked" : ""}> Show snapshots / pre-releases</label>` : ""}
@@ -879,7 +897,7 @@ async function openCreateWizard() {
       wiz.javaReq = r;
       box.innerHTML = r.ok
         ? `<div class="hint">${ico("coffee")} Minecraft ${esc(r.mc)} needs <b>Java ${r.required}</b> — will run on Java ${esc(r.java.version)}.</div>`
-        : `<div class="hint" style="color:var(--amber)">${ico("coffee")} Minecraft ${esc(r.mc)} needs <b>Java ${r.required}</b>, which isn't on this machine.
+        : `<div class="hint" style="color:var(--warning)">${ico("coffee")} Minecraft ${esc(r.mc)} needs <b>Java ${r.required}</b>, which isn't on this machine.
              MC Hoster will download Eclipse Temurin ${r.required} automatically (~45 MB, once).
              <button class="btn btn-sm" id="java-now" style="margin-left:6px">Get it now</button></div>`;
       const btn = $("#java-now");
@@ -950,15 +968,15 @@ async function openCreateWizard() {
         </div>
         <div class="hint">${loaderMemHint(wiz.loader)}</div>
       </div>
-      <div class="summary-box muted" style="font-size:12.5px;background:var(--bg-2);border:1px solid var(--line);border-radius:8px;padding:12px">
+      <div class="summary-box muted" style="font-size:12.5px;background:var(--surface-sunken);border:1px solid var(--hairline);border-radius:8px;padding:12px">
         ${wiz.pack
-          ? `${ico("box")} <b style="color:var(--text)">${esc(wiz.pack.title)}</b> ${esc(wiz.packVersion ? wiz.packVersion.number : "")} · Minecraft <b style="color:var(--text)">${esc(wiz.mc)}</b> · ${esc((wiz.packVersion && wiz.packVersion.loaders[0]) || "")}
+          ? `${ico("box")} <b style="color:var(--ink)">${esc(wiz.pack.title)}</b> ${esc(wiz.packVersion ? wiz.packVersion.number : "")} · Minecraft <b style="color:var(--ink)">${esc(wiz.mc)}</b> · ${esc((wiz.packVersion && wiz.packVersion.loaders[0]) || "")}
              <div style="margin-top:6px">Its mods and configs are downloaded during setup — client-only mods are left out.</div>`
-          : `<b style="color:var(--text)">${esc(cap(wiz.loader))}</b> · Minecraft <b style="color:var(--text)">${esc(wiz.mc)}</b>${wiz.build ? ` · build <b style="color:var(--text)">${esc(wiz.build)}</b>` : ""}`}
+          : `<b style="color:var(--ink)">${esc(cap(wiz.loader))}</b> · Minecraft <b style="color:var(--ink)">${esc(wiz.mc)}</b>${wiz.build ? ` · build <b style="color:var(--ink)">${esc(wiz.build)}</b>` : ""}`}
         ${wiz.javaReq
           ? wiz.javaReq.ok
             ? `<div style="margin-top:8px">${ico("coffee")} Java ${wiz.javaReq.required} · using ${esc(wiz.javaReq.java.version)}</div>`
-            : `<div style="color:var(--amber);margin-top:8px">${ico("coffee")} Needs Java ${wiz.javaReq.required} — MC Hoster will download Eclipse Temurin ${wiz.javaReq.required} during setup.</div>`
+            : `<div style="color:var(--warning);margin-top:8px">${ico("coffee")} Needs Java ${wiz.javaReq.required} — MC Hoster will download Eclipse Temurin ${wiz.javaReq.required} during setup.</div>`
           : ""}
       </div>`;
     const mem = $("#d-mem");
@@ -1382,7 +1400,9 @@ function pingChip(ms) {
   if (!Number.isFinite(ms))
     return `<span class="ping none" title="This server doesn't report ping — Paper and Purpur do.">—</span>`;
   const q = ms < 80 ? "good" : ms < 160 ? "ok" : "bad";
-  return `<span class="ping ${q}" title="${ms} ms round-trip"><i></i>${ms}<small>ms</small></span>`;
+  const word = { good: "Good", ok: "Fair", bad: "Poor" }[q];
+  return `<span class="ping ${q}" title="${word} — ${ms} ms round-trip"><i></i>${ms}<small>ms</small></span>`;
+
 }
 
 /* --------------------------------------------------------------- players tab */
@@ -4381,7 +4401,7 @@ async function renderSettingsTab(id) {
       <div id="st-voice" class="form-row"></div>
 
       <div class="divider"></div>
-      <div class="section-title" style="color:var(--red)">Danger zone</div>
+      <div class="section-title" style="color:var(--danger)">Danger zone</div>
       <div class="banner err" style="align-items:center">
         <div>Delete this server and all its files (world, mods, configs). This cannot be undone.</div>
         <div class="b-actions"><button class="btn btn-red" id="st-delete">Delete server</button></div>
@@ -4854,7 +4874,7 @@ function pickVoiceTunnel(id, btn, v) {
     list.innerHTML = `<div class="file-row"><span class="fname muted">Loading tunnels…</span></div>`;
     let tunnels = [];
     try { tunnels = (await API.get("/api/playit/voice-tunnels")).tunnels; }
-    catch (e) { list.innerHTML = `<div class="file-row"><span class="fname" style="color:var(--red)">${esc(e.message)}</span></div>`; return; }
+    catch (e) { list.innerHTML = `<div class="file-row"><span class="fname" style="color:var(--danger)">${esc(e.message)}</span></div>`; return; }
     if (!tunnels.length) {
       list.innerHTML = `<div class="file-row"><span class="fname muted">No UDP tunnels on your playit account yet — make one at playit.gg, then press Refresh.</span></div>`;
       return;
@@ -5040,7 +5060,7 @@ function quotaRowsHTML(q) {
       <div class="file-row" title="Each tunnel uses one port">
         <span class="fic">${ico(what === "voice" ? "mic" : "globe")}</span>
         <span class="fname">${label} <span class="muted">· ${what === "voice" ? "voice chat" : "game addresses"}</span></span>
-        <span class="fsize" style="${full ? "color:var(--red)" : ""}">${p.used} of ${p.allowed} used${full ? " · full" : ` · ${p.free} free`}</span>
+        <span class="fsize" style="${full ? "color:var(--danger)" : ""}">${p.used} of ${p.allowed} used${full ? " · full" : ` · ${p.free} free`}</span>
       </div>`;
   };
   return row("TCP ports", "game", q.tcp) + row("UDP ports", "voice", q.udp);
