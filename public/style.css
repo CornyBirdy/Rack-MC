@@ -1221,3 +1221,24 @@ select { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmln
   .fm-usage-row { grid-template-columns: minmax(0, 1fr) 64px 34px; }
 }
 .md-drop { min-height: 64px; }
+
+/* ---- scheduled uptime ---- */
+input[type="time"] {
+  background: var(--bg-2); border: 1px solid var(--line-2); border-radius: var(--radius-sm); color: var(--text);
+  font-family: inherit; font-size: 13.5px; padding: 8px 10px; outline: none; color-scheme: dark;
+}
+.sched-body { margin-top: 12px; }
+.sched-body[hidden] { display: none; }
+.sched-presets { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+.sched-presets .unit { font-size: 11.5px; color: var(--muted-2); margin-right: 2px; }
+.sched-win {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px 14px; margin-bottom: 8px;
+  border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-2);
+}
+.sched-win .hint { flex-basis: 100%; margin-top: -4px; }
+.sched-days { display: flex; gap: 4px; flex-wrap: wrap; }
+.sched-days .plog-chip { min-width: 40px; }
+.sched-times { display: flex; align-items: center; gap: 8px; }
+.sched-times .unit, .sched-close .unit { font-size: 11.5px; color: var(--muted-2); }
+.sched-close { display: flex; align-items: center; gap: 10px; }
+.sched-close select { flex: 1; min-width: 0; }

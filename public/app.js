@@ -1085,6 +1085,8 @@ async function renderServer(id) {
     if (u && cur.startedAt) u.textContent = fmtUptime(Date.now() - cur.startedAt);
     const rs = $("#restart-secs");
     if (rs && (cur.restartAt || cur.lagRestartAt)) rs.textContent = restartSecs(cur);
+    const ss = $("#sched-secs");
+    if (ss && cur.schedStopAt) ss.textContent = fmtCountdown(cur.schedStopAt);
     if (state.activeTab === "stats") perfPaintSession(id);
   }, 1000);
 }
@@ -1122,6 +1124,18 @@ function renderEula(s) {
       try { await API.post(`/api/servers/${s.id}/cancel-restart`); toast("Restart cancelled.", "ok"); }
       catch (e) { toast(e.message, "err"); }
     };
+  } else if (s.schedStopAt || s.schedWaiting) {
+    slot.innerHTML = `<div class="banner warn">
+      <span>${ico("clock")}</span>
+      <div>${s.schedStopAt
+        ? `Scheduled hours are over. Stopping in <b id="sched-secs">${fmtCountdown(s.schedStopAt)}</b> — players have been warned.`
+        : "Scheduled hours are over. The server stops once the last player leaves."}</div>
+      <div class="b-actions"><button class="btn btn-sm" id="cancel-sched">Keep it running</button></div>
+    </div>`;
+    $("#cancel-sched").onclick = async () => {
+      try { await API.post(`/api/servers/${s.id}/cancel-restart`); toast("It stays up until the next closing time.", "ok"); }
+      catch (e) { toast(e.message, "err"); }
+    };
   } else if (s.crashGaveUp) {
     slot.innerHTML = `<div class="banner err">${ico("alert")} This server crashed 3 times in 10 minutes, so it won't be restarted again automatically. Check the console for the cause, then press Start.</div>`;
   } else if (!s.eula) {
@@ -1138,6 +1152,10 @@ function renderEula(s) {
 }
 
 const restartSecs = (s) => Math.max(0, Math.ceil(((s.restartAt || s.lagRestartAt) - Date.now()) / 1000));
+const fmtCountdown = (at) => {
+  const left = Math.max(0, Math.ceil((at - Date.now()) / 1000));
+  return left >= 60 ? `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}` : left + "s";
+};
 
 async function serverAction(id, act) {
   try {
@@ -4351,6 +4369,10 @@ async function renderSettingsTab(id) {
       <div style="display:flex;gap:10px;margin-top:8px"><button class="btn btn-primary" id="st-save">Save changes</button></div>
 
       <div class="divider"></div>
+      <div class="section-title" style="margin-top:0">Scheduled uptime</div>
+      <div id="st-sched"></div>
+
+      <div class="divider"></div>
       <div class="section-title" style="margin-top:0">Public address</div>
       <div id="st-playit"></div>
 
@@ -4371,6 +4393,7 @@ async function renderSettingsTab(id) {
   const wakeSw = $("#st-wake");
   const lagSw = $("#st-lag");
   lagSw.onchange = () => ($("#st-lag-tps").disabled = $("#st-lag-mins").disabled = !lagSw.checked);
+  renderServerSchedule(id, data.schedule);
   renderServerPlayit(id);
   voiceDisk.set(id, data.voice || {});
   renderServerVoice(id);
@@ -4400,6 +4423,127 @@ async function renderSettingsTab(id) {
       "Delete forever"))) return;
     try { await API.del(`/api/servers/${id}`); state.servers.delete(id); toast("Server deleted.", "ok"); go("#/"); }
     catch (e) { toast(e.message, "err"); }
+  };
+}
+
+// Opening hours for a server: weekday chips and a from/to pair per window. The
+// panel starts it as a window opens and stops it as the last one closes; the
+// times are the panel computer's clock, which is said when the browser's differs.
+const SCHED_DAYS = [[1, "Mon"], [2, "Tue"], [3, "Wed"], [4, "Thu"], [5, "Fri"], [6, "Sat"], [0, "Sun"]];
+const SCHED_PRESETS = {
+  evenings: [{ days: [1, 2, 3, 4, 5], from: "16:00", to: "23:00" }, { days: [6, 0], from: "10:00", to: "00:00" }],
+  weekends: [{ days: [5], from: "16:00", to: "00:00" }, { days: [6], from: "00:00", to: "00:00" }, { days: [0], from: "00:00", to: "22:00" }],
+  daily: [{ days: [0, 1, 2, 3, 4, 5, 6], from: "08:00", to: "23:00" }],
+};
+
+function fmtSchedNext(n) {
+  if (!n) return "it stays up all week";
+  const d = new Date(n.at);
+  const t = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+  const midnight = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const days = Math.round((midnight(d) - midnight(new Date())) / 86400000);
+  const day = days === 0 ? "today" : days === 1 ? "tomorrow" : d.toLocaleDateString([], { weekday: "long" });
+  return `${n.kind === "start" ? "starts" : "stops"} ${day} at ${t}`;
+}
+
+function renderServerSchedule(id, sch) {
+  const box = $("#st-sched");
+  if (!box) return;
+  sch = sch || {};
+  let wins = (sch.windows && sch.windows.length ? sch.windows : SCHED_PRESETS.evenings).map((w) => ({ ...w, days: [...w.days] }));
+  const browserZone = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone; } catch { return null; } })();
+  const zoneNote = sch.zone && browserZone && sch.zone !== browserZone
+    ? ` Times are on the panel computer's clock (<b>${esc(sch.zone)}</b>), not this device's.`
+    : "";
+
+  box.innerHTML = `
+    <div class="switch-row">
+      <label class="switch"><input type="checkbox" id="sch-on" ${sch.on ? "checked" : ""} /><i></i></label>
+      <div class="txt"><b>Only run this server at set times</b><span>Starts it when a window opens and stops it when it closes. Start and Stop still work in between.</span></div>
+    </div>
+    <div id="sch-body" class="sched-body">
+      <div class="sched-presets"><span class="unit">Quick fill:</span>
+        <button class="plog-chip" data-preset="evenings">Evenings &amp; weekends</button>
+        <button class="plog-chip" data-preset="weekends">Weekends only</button>
+        <button class="plog-chip" data-preset="daily">Every day, 8 am – 11 pm</button>
+      </div>
+      <div id="sch-wins"></div>
+      <button class="btn btn-sm btn-ghost" id="sch-add">${ico("plus")} Add window</button>
+      <div class="form-row" style="margin-top:16px">
+        <label>At closing time, if players are still on</label>
+        <div class="sched-close">
+          <select id="sch-players">
+            <option value="warn" ${sch.players !== "wait" ? "selected" : ""}>Warn them, then stop after</option>
+            <option value="wait" ${sch.players === "wait" ? "selected" : ""}>Wait until the last one leaves</option>
+          </select>
+          <input type="number" id="sch-warn" min="1" max="60" value="${Number(sch.warnMins) || 5}" style="width:72px" />
+          <span class="unit" id="sch-warn-unit">min</span>
+        </div>
+      </div>
+    </div>
+    <div class="hint" id="sch-status" style="margin:10px 0 12px"></div>
+    <button class="btn btn-primary" id="sch-save">Save schedule</button>`;
+
+  const paintWins = () => {
+    $("#sch-wins").innerHTML = wins.map((w, i) => `
+      <div class="sched-win" data-i="${i}">
+        <div class="sched-days">${SCHED_DAYS.map(([d, n]) =>
+          `<button class="plog-chip ${w.days.includes(d) ? "on" : ""}" data-day="${d}">${n}</button>`).join("")}</div>
+        <div class="sched-times">
+          <input type="time" class="sch-from" value="${esc(w.from)}" />
+          <span class="unit">to</span>
+          <input type="time" class="sch-to" value="${esc(w.to)}" />
+          <button class="btn btn-sm btn-ghost btn-icon" data-del title="Remove this window" ${wins.length < 2 ? "disabled" : ""}>${ico("trash")}</button>
+        </div>
+        ${w.to <= w.from ? `<div class="hint">${w.to === w.from ? "The whole 24 hours." : w.to === "00:00" ? "Until midnight." : "Runs past midnight into the next day."}</div>` : ""}
+      </div>`).join("");
+    $$("#sch-wins .sched-win").forEach((row) => {
+      const w = wins[Number(row.dataset.i)];
+      $$("[data-day]", row).forEach((b) => (b.onclick = () => {
+        const d = Number(b.dataset.day);
+        w.days = w.days.includes(d) ? w.days.filter((x) => x !== d) : [...w.days, d];
+        paintWins();
+      }));
+      $(".sch-from", row).onchange = (e) => { w.from = e.target.value; paintWins(); };
+      $(".sch-to", row).onchange = (e) => { w.to = e.target.value; paintWins(); };
+      $("[data-del]", row).onclick = () => { wins.splice(Number(row.dataset.i), 1); paintWins(); };
+    });
+  };
+  const paintStatus = () => {
+    const on = $("#sch-on").checked;
+    $("#sch-body").hidden = !on;
+    const wait = $("#sch-players").value === "wait";
+    $("#sch-warn").hidden = $("#sch-warn-unit").hidden = wait;
+    const cur = state.servers.get(id);
+    const live = cur && cur.schedule;
+    $("#sch-status").innerHTML = !on
+      ? "Off — the server runs whenever you start it."
+      : live && sch.on
+        ? `Now <b>${live.inside ? "inside" : "outside"}</b> scheduled hours — ${esc(fmtSchedNext(live.next))}.${zoneNote}`
+        : `Saving applies it straight away: a stopped server inside these hours starts, a running one outside them gets its closing time.${zoneNote}`;
+  };
+  paintWins();
+  paintStatus();
+  $("#sch-on").onchange = paintStatus;
+  $("#sch-players").onchange = paintStatus;
+  $("#sch-add").onclick = () => { wins.push({ days: [6, 0], from: "12:00", to: "22:00" }); paintWins(); };
+  $$("[data-preset]", box).forEach((b) => (b.onclick = () => {
+    wins = SCHED_PRESETS[b.dataset.preset].map((w) => ({ ...w, days: [...w.days] }));
+    paintWins();
+  }));
+  $("#sch-save").onclick = async () => {
+    const on = $("#sch-on").checked;
+    if (on && !wins.some((w) => w.days.length && w.from && w.to))
+      return toast("Pick at least one day for a window.", "err");
+    try {
+      const r = await API.patch(`/api/servers/${id}`, {
+        uptime: { on, windows: wins, players: $("#sch-players").value, warnMins: Number($("#sch-warn").value) || 5 },
+      });
+      state.servers.set(id, r.server);
+      toast(on ? "Schedule saved — it " + fmtSchedNext(r.server.schedule && r.server.schedule.next) + "." : "Schedule off.", "ok");
+      const fresh = await API.get(`/api/servers/${id}`);
+      renderServerSchedule(id, fresh.schedule);
+    } catch (e) { toast(e.message, "err"); }
   };
 }
 

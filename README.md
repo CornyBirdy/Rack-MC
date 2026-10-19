@@ -323,8 +323,8 @@ modpack stays.
 - **Properties** — edit `server.properties` directly.
 - **Settings** — rename, change RAM/port/max-players, custom JVM args (Aikar's
   flags), Java override, the **public address** switch, **voice chat**, the
-  two **sleep** switches, the three **auto-restart** switches, or delete the
-  server.
+  two **sleep** switches, the three **auto-restart** switches, **scheduled
+  uptime**, or delete the server.
 
 ## Server stats
 
@@ -518,6 +518,38 @@ on an always-on PC.
   that reports TPS: Minecraft 1.20.3 or newer, or Paper, Purpur, Forge or
   NeoForge on any version.
 
+## Scheduled uptime
+
+**Settings → Scheduled uptime** gives a server opening hours, for one that only
+needs to be up when people actually play (evenings and weekends, say) so the
+machine gets its RAM and CPU back the rest of the time.
+
+- **Windows.** Each window is a set of weekdays plus a from/to time. Add as many
+  as you need, or start from a quick fill (*Evenings & weekends*, *Weekends
+  only*, *Every day*). A window whose end is before its start runs past
+  midnight, so *Fri 20:00 to 02:00* is Friday night; equal times mean the whole
+  day. Windows that meet are joined, so the server isn't stopped and started
+  again at midnight between two of them.
+- **The panel acts at the edges.** When a window opens it starts the server;
+  when it closes it stops it. In between, **Start** and **Stop** work as normal:
+  stopping it mid-evening, or starting it at 3 am for a friend, sticks until
+  the next opening or closing time.
+- **Players still on at closing time** are either warned in chat and given a
+  few minutes (reminders at one minute and ten seconds), or the server waits
+  until the last one leaves. A banner on the server page shows it, with **Keep
+  it running** to call it off. If everyone leaves early it stops straight away.
+- **Saving a new schedule applies it now**: a stopped server inside its new
+  hours starts, a running one outside them gets its closing time. Saving the
+  same hours again changes nothing.
+- **The panel being closed doesn't lose an edge.** The panel remembers which
+  side of the schedule it last acted on, so a window that opened or closed
+  while it was down is acted on when it comes back. *Start with panel* leaves
+  a scheduled server alone outside its hours.
+
+Times are on the panel computer's clock. If the device you're using is in a
+different time zone, the settings say so. Wake on join still works outside the
+hours, so a sleeping server can be woken by someone knocking.
+
 ## System monitor
 
 The sidebar carries a permanent CPU / RAM / disk strip — a bar plus a number
@@ -550,6 +582,7 @@ MC_hoster/
 │  ├─ manager.js        server lifecycle, console, players
 │  ├─ host.js           keeper process that holds one server across panel restarts
 │  ├─ hosted.js         the panel's side of host.js: launch, reconnect, talk
+│  ├─ uptime.js         scheduled uptime: opening-hours windows and their edges
 │  ├─ perf.js           per-server TPS / CPU / memory / lag stats + history
 │  ├─ playerlog.js      durable per-server player history (sessions, chat…)
 │  ├─ sysmon.js         host CPU / RAM / disk sampling for the meters
