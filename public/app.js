@@ -289,7 +289,7 @@ function applyTheme(theme) {
   try { localStorage.setItem("theme", theme); } catch {}
   $("#nav-theme-label").textContent = `Theme: ${theme}`;
   const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.content = theme === "light" ? "#eceef5" : "#111217";
+  if (meta) meta.content = theme === "light" ? "#e7e9f0" : "#282a31";
 }
 
 /* ---------------------------------------------------------------- bootstrap */

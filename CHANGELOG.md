@@ -8,6 +8,16 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## 2026-10-19
 
+### Changed
+
+- **New look: the Rack Suite "Twilight" palette**, replacing Sunset from
+  earlier today. Graphite with a faint periwinkle tint and teal for what you
+  act on: primary buttons, the selected server (with a teal stripe), switches,
+  meters and focus. Memory charts are periwinkle. Buttons are soft — a raised
+  fill and a faint ring instead of an outline, Stop and Delete a red tint —
+  and every control shows the same teal focus ring. Light theme is still the
+  **Theme** button in the sidebar.
+
 ### Added
 
 - **Scheduled uptime.** A server can have opening hours: **Settings →
