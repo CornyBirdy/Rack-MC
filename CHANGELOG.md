@@ -6,6 +6,20 @@ the day the work landed.
 
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-10-19
+
+### Added
+
+- **Scheduled uptime.** A server can have opening hours: **Settings →
+  Scheduled uptime** takes one or more windows of weekdays and times (with
+  quick fills for evenings and weekends), and the panel starts the server when
+  a window opens and stops it when it closes. Start and Stop still work in
+  between, and what you do sticks until the next edge. Players still on at
+  closing time are warned in chat and given a few minutes, or the server waits
+  for the last one to leave; a banner with **Keep it running** calls it off.
+  An edge that passed while the panel was closed is acted on when it comes
+  back.
+
 ## 2026-10-18
 
 ### Added

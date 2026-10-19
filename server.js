@@ -23,6 +23,7 @@ const modrinth = require("./lib/modrinth");
 const playerlog = require("./lib/playerlog");
 const backup = require("./lib/backup");
 const voicechat = require("./lib/voicechat");
+const uptime = require("./lib/uptime");
 
 // Port precedence: explicit flag, then the launcher's MC_PORT (our portEnv),
 // then whatever Rack/the old controller assigned, then the standalone default.
@@ -429,6 +430,7 @@ const server = http.createServer(async (req, res) => {
           def,
           pauseSupported: manager.supportsPause(def.mc),
           voice: voicechat.info(def, { deep: true }),
+          schedule: { ...uptime.normalize(def.uptime), zone: uptime.zone(), now: Date.now() },
           installLog: s.install.log,
         });
       }
@@ -449,11 +451,20 @@ const server = http.createServer(async (req, res) => {
         if ("backupEvery" in body) patch.backupEvery = Math.max(0, Math.min(24 * 30, Number(body.backupEvery) || 0));
         if ("backupKeep" in body) patch.backupKeep = Math.max(1, Math.min(200, Math.round(Number(body.backupKeep)) || 7));
         if ("backupScope" in body) patch.backupScope = backup.SCOPES.includes(body.backupScope) ? body.backupScope : "world";
+        let uptimeChanged = false;
+        if ("uptime" in body) {
+          patch.uptime = uptime.normalize(body.uptime);
+          // Only a different schedule is re-applied; re-saving the same one
+          // mustn't stop a server someone started outside its hours.
+          const hours = (u) => JSON.stringify([u.on, u.windows]);
+          uptimeChanged = hours(uptime.normalize(def.uptime)) !== hours(patch.uptime);
+        }
         store.update(id, patch);
         if ("pauseWhenEmpty" in patch) manager.applyPauseProperty(id);
         if ("sleepAfter" in patch) manager.applySleepSetting(id);
         if ("restartOnCrash" in patch || "lagRestartTps" in patch || "lagRestartMins" in patch)
           manager.applyRestartSettings(id);
+        if ("uptime" in patch) manager.applyUptimeSetting(id, uptimeChanged);
         if ("wakeOnJoin" in patch || "port" in patch || "name" in patch)
           manager.applyWakeSetting(id).catch(() => {});
         // The playit tunnel points at a fixed local port, so a port change has
@@ -766,6 +777,7 @@ server.listen(PORT, async () => {
   }
   manager.initWake(); // stopped servers that want waking need their port held
   manager.autostart().catch((e) => console.error("[autostart]", e && e.message));
+  manager.initSchedule(); // opening hours, including any edge that passed while we were closed
   // Only auto-open a browser when launched standalone. Rack captures this
   // process's console and provides its own links, so never pop a window there.
   const supervised = process.env.RACK || process.env.MAC;
