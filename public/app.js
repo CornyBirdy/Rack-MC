@@ -414,6 +414,10 @@ async function handleGlobalEvent(e) {
     }
     return;
   }
+  if (e.type === "transfer") {
+    onTransferEvent(e);
+    return;
+  }
   if (e.type === "playerlog") {
     if (state.route.name === "server" && state.route.id === e.id) patchServerLive(e);
     return;
@@ -677,7 +681,10 @@ function renderDashboard() {
           <h1>Dashboard</h1>
           <p>${servers.length} server${servers.length === 1 ? "" : "s"} · ${online} online</p>
         </div>
-        <button class="btn btn-primary" id="dash-create"><span class="ic">＋</span> Create Server</button>
+        <div style="display:flex;gap:10px">
+          <button class="btn" id="dash-import" title="Bring in a server exported from MC Hoster">${ico("download")} Import</button>
+          <button class="btn btn-primary" id="dash-create"><span class="ic">＋</span> Create Server</button>
+        </div>
       </div>
       ${sysCardHTML()}
       ${servers.length ? `<div class="grid">${servers.map(cardHTML).join("")}</div>` : emptyHTML()}
@@ -685,7 +692,9 @@ function renderDashboard() {
 
   paintSysmon();
   $("#dash-create").onclick = openCreateWizard;
+  $("#dash-import").onclick = openImport;
   if (!servers.length) $("#empty-create") && ($("#empty-create").onclick = openCreateWizard);
+  if (!servers.length) $("#empty-import") && ($("#empty-import").onclick = openImport);
   $$(".srv-card").forEach((el) => {
     el.onclick = (e) => { if (!e.target.closest("[data-act]")) go("#/server/" + el.dataset.id); };
   });
@@ -699,6 +708,7 @@ function emptyHTML() {
     <h2>No servers yet</h2>
     <p>Spin up a vanilla or modded Minecraft server in a few clicks.</p>
     <button class="btn btn-primary" id="empty-create">${ico("plus")} Create your first server</button>
+    <p class="empty-alt">Moving from another computer? <a href="javascript:void 0" id="empty-import">Import a server</a> exported from MC Hoster.</p>
   </div>`;
 }
 
@@ -4436,6 +4446,14 @@ async function renderSettingsTab(id) {
       </div>
 
       <div class="divider"></div>
+      <div class="section-title" style="margin-top:0">Export or move</div>
+      <div class="banner dup-banner">
+        <div>Save this server as a file, or send it to MC Hoster on another computer. Bring it in there with <b>Import</b> on the dashboard. This server isn't changed.</div>
+        <div class="b-actions"><button class="btn" id="st-export">${ico("upload")} Export…</button></div>
+      </div>
+      <div id="st-exports"></div>
+
+      <div class="divider"></div>
       <div class="section-title" style="color:var(--danger)">Danger zone</div>
       <div class="banner err" style="align-items:center">
         <div>Delete this server and all its files (world, mods, configs). This cannot be undone.</div>
@@ -4471,6 +4489,8 @@ async function renderSettingsTab(id) {
     } catch (e) { toast(e.message, "err"); }
   };
   $("#st-dup").onclick = () => openDuplicate(id);
+  $("#st-export").onclick = () => openExport(id);
+  loadServerExports(id);
   $("#st-delete").onclick = async () => {
     const pl = state.servers.get(id)?.playit;
     if (!(await confirmDialog("Delete server?",
@@ -4494,6 +4514,63 @@ const DUP_PRESETS = {
   none: { label: "Fresh start", world: false, content: false, config: false, players: false },
 };
 
+// The part checkboxes and quick picks Duplicate and Export share. `plan` is
+// what /duplicate (or /export) measured; the server software always comes.
+function planParts(plan) {
+  const noun = plan.content ? plan.content.noun : "Mods";
+  return [
+    { k: "world", title: "World", desc: plan.level
+        ? `<code>${esc(plan.level)}</code> with its Nether and End${plan.datapacks ? ", datapacks included" : ""}`
+        : "No world yet — the copy makes its own on first start", has: plan.has.world },
+    plan.content && { k: "content", title: noun, desc: `everything in <code>${esc(plan.content.folder)}/</code>${plan.content.folder === "plugins" ? ", plugin settings included" : ""}`, has: plan.has.content },
+    { k: "config", title: "Configs", desc: "<code>server.properties</code>, <code>config/</code> and the other settings files", has: plan.has.config },
+    { k: "players", title: "Player lists", desc: "ops, whitelist and bans", has: plan.has.players },
+  ].filter(Boolean);
+}
+
+function partsPickerHTML(plan, s) {
+  const noun = plan.content ? plan.content.noun : "Mods";
+  return `
+    <div class="seg seg-sm pp-presets" style="margin-bottom:10px;flex-wrap:wrap">
+      ${Object.entries(DUP_PRESETS).filter(([k]) => plan.content || k !== "world")
+        .map(([k, p]) => `<button class="seg-btn" data-p="${k}">${esc(k === "content" ? (plan.content ? `${noun}, fresh world` : "Fresh world") : p.label)}</button>`).join("")}
+    </div>
+    <div class="dup-parts">
+      ${planParts(plan).map((p) => `
+        <label class="dup-part ${p.has ? "" : "empty"}">
+          <input type="checkbox" data-k="${p.k}" ${p.has ? "" : "disabled"} />
+          <span class="dup-txt"><b>${esc(p.title)}</b><span>${p.has ? p.desc : p.k === "world" ? p.desc : "Nothing here yet"}</span></span>
+          <span class="dup-size">${p.has ? fmtBytes(plan.sizes[p.k]) : "—"}</span>
+        </label>`).join("")}
+      <div class="dup-part always">
+        <span class="dup-tick">${ico("check")}</span>
+        <span class="dup-txt"><b>Server software</b><span>${esc(cap(s.modLoader || s.loader || ""))} for Minecraft ${esc(s.mc || "")} — always included, so nothing needs installing</span></span>
+        <span class="dup-size">${fmtBytes(plan.sizes.software)}</span>
+      </div>
+    </div>`;
+}
+
+// Wires the picker inside `root`; `onPaint({on, bytes, noun})` runs on every
+// change. Returns { opts() } — the ticked parts, as the backend takes them.
+function bindPartsPicker(root, plan, onPaint) {
+  const parts = planParts(plan);
+  const noun = plan.content ? plan.content.noun : "Mods";
+  const pick = { ...DUP_PRESETS.all };
+  const box = (k) => $(`[data-k="${k}"]`, root);
+  const on = (k) => { const c = box(k); return !!c && c.checked; };
+  const paint = () => {
+    $$("[data-k]", root).forEach((c) => { if (!c.disabled) c.checked = !!pick[c.dataset.k]; });
+    const preset = Object.entries(DUP_PRESETS).find(([, p]) => parts.every((x) => !x.has || !!p[x.k] === on(x.k)));
+    $$(".pp-presets .seg-btn", root).forEach((b) => b.classList.toggle("on", !!preset && preset[0] === b.dataset.p));
+    const bytes = plan.sizes.software + parts.reduce((a, p) => a + (on(p.k) ? plan.sizes[p.k] : 0), 0);
+    onPaint({ on, bytes, noun });
+  };
+  $$(".pp-presets .seg-btn", root).forEach((b) => (b.onclick = () => { Object.assign(pick, DUP_PRESETS[b.dataset.p]); paint(); }));
+  $$("[data-k]", root).forEach((c) => (c.onchange = () => { pick[c.dataset.k] = c.checked; paint(); }));
+  paint();
+  return { opts: () => Object.fromEntries($$("[data-k]", root).map((c) => [c.dataset.k, c.checked])) };
+}
+
 async function openDuplicate(id) {
   const s = state.servers.get(id) || {};
   modal(`
@@ -4513,17 +4590,6 @@ async function openDuplicate(id) {
   const body = $("#dup-body");
   if (!body) return; // closed while measuring
 
-  const noun = plan.content ? plan.content.noun : "Mods";
-  const parts = [
-    { k: "world", title: "World", desc: plan.level
-        ? `<code>${esc(plan.level)}</code> with its Nether and End${plan.datapacks ? ", datapacks included" : ""}`
-        : "No world yet — the copy makes its own on first start", has: plan.has.world },
-    plan.content && { k: "content", title: noun, desc: `everything in <code>${esc(plan.content.folder)}/</code>${plan.content.folder === "plugins" ? ", plugin settings included" : ""}`, has: plan.has.content },
-    { k: "config", title: "Configs", desc: "<code>server.properties</code>, <code>config/</code> and the other settings files", has: plan.has.config },
-    { k: "players", title: "Player lists", desc: "ops, whitelist and bans", has: plan.has.players },
-  ].filter(Boolean);
-  const pick = { ...DUP_PRESETS.all };
-
   body.innerHTML = `
     <div class="two-col">
       <div class="form-row"><label>Name</label><input type="text" id="dup-name" maxlength="64" value="${esc(plan.name)}" /></div>
@@ -4531,33 +4597,12 @@ async function openDuplicate(id) {
     </div>
     <div class="form-row">
       <label>What to copy</label>
-      <div class="seg seg-sm" id="dup-presets" style="margin-bottom:10px;flex-wrap:wrap">
-        ${Object.entries(DUP_PRESETS).filter(([k]) => plan.content || k !== "world")
-          .map(([k, p]) => `<button class="seg-btn" data-p="${k}">${esc(k === "content" ? (plan.content ? `${noun}, fresh world` : "Fresh world") : p.label)}</button>`).join("")}
-      </div>
-      <div class="dup-parts">
-        ${parts.map((p) => `
-          <label class="dup-part ${p.has ? "" : "empty"}">
-            <input type="checkbox" data-k="${p.k}" ${p.has ? "" : "disabled"} />
-            <span class="dup-txt"><b>${esc(p.title)}</b><span>${p.has ? p.desc : p.k === "world" ? p.desc : "Nothing here yet"}</span></span>
-            <span class="dup-size">${p.has ? fmtBytes(plan.sizes[p.k]) : "—"}</span>
-          </label>`).join("")}
-        <div class="dup-part always">
-          <span class="dup-tick">${ico("check")}</span>
-          <span class="dup-txt"><b>Server software</b><span>${esc(cap(s.modLoader || s.loader || ""))} for Minecraft ${esc(s.mc || "")} — always copied, so nothing needs installing</span></span>
-          <span class="dup-size">${fmtBytes(plan.sizes.software)}</span>
-        </div>
-      </div>
+      ${partsPickerHTML(plan, s)}
       <div class="hint" style="margin-top:8px">Logs, backups, stats and player history stay with the original. So do its public address, opening hours and "start with panel".</div>
     </div>
     <div id="dup-warn"></div>`;
 
-  const paint = () => {
-    $$("#dup-body [data-k]").forEach((c) => { if (!c.disabled) c.checked = !!pick[c.dataset.k]; });
-    const on = (k) => { const c = $(`#dup-body [data-k="${k}"]`); return !!c && c.checked; };
-    const preset = Object.entries(DUP_PRESETS).find(([, p]) => parts.every((x) => !x.has || !!p[x.k] === on(x.k)));
-    $$("#dup-presets .seg-btn").forEach((b) => b.classList.toggle("on", !!preset && preset[0] === b.dataset.p));
-    const bytes = plan.sizes.software + parts.reduce((a, p) => a + (on(p.k) ? plan.sizes[p.k] : 0), 0);
+  const picker = bindPartsPicker(body, plan, ({ on, bytes, noun }) => {
     $("#dup-total").textContent = `About ${fmtBytes(bytes)} to copy`;
     let warn = "";
     if (plan.modded && on("world") && plan.has.content && !on("content"))
@@ -4565,16 +4610,12 @@ async function openDuplicate(id) {
     if (on("world") && plan.running)
       warn += `<div class="hint">${esc(s.name)} is running, so it saves its world first and pauses autosaving until the copy has it. Players stay connected.</div>`;
     $("#dup-warn").innerHTML = warn;
-  };
-  $$("#dup-presets .seg-btn").forEach((b) => (b.onclick = () => { Object.assign(pick, DUP_PRESETS[b.dataset.p]); paint(); }));
-  $$("#dup-body [data-k]").forEach((c) => (c.onchange = () => { pick[c.dataset.k] = c.checked; paint(); }));
-  paint();
+  });
 
   const btn = $("#dup-go");
   btn.disabled = false;
   btn.onclick = async () => {
-    const opts = {};
-    $$("#dup-body [data-k]").forEach((c) => (opts[c.dataset.k] = c.checked));
+    const opts = picker.opts();
     btn.disabled = true;
     try {
       const r = await API.post(`/api/servers/${id}/duplicate`, {
@@ -4587,6 +4628,400 @@ async function openDuplicate(id) {
       go("#/server/" + r.server.id);
     } catch (e) { btn.disabled = false; toast(e.message, "err"); }
   };
+}
+
+/* ------------------------------------------------------- export and import */
+/* Moving a server to another MC Hoster: export it to a zip (downloaded, saved
+ * in a folder on the panel computer, or sent straight to another panel), and
+ * import that zip on the other side. The zip carries the server folder plus
+ * mchoster.json saying what it is, so the other panel needs nothing else. */
+const EX_MODES = {
+  download: { label: "Download", icon: "download" },
+  folder: { label: "Save to a folder", icon: "folder" },
+  send: { label: "Send to another panel", icon: "globe" },
+};
+const EX_PHASE = { starting: "Starting", saving: "Saving the world", collecting: "Listing files", zipping: "Packing", connecting: "Reaching the other panel", sending: "Sending", importing: "Handing it over" };
+const PART_LABEL = { world: "World", content: "Mods", config: "Configs", players: "Player lists" };
+let exView = null; // the open export dialog: { id, mode, eid }
+
+const lsGet = (k) => { try { return localStorage.getItem(k) || ""; } catch { return ""; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
+
+function partsText(parts, noun = "Mods") {
+  return parts && parts.length ? parts.map((p) => (p === "content" ? noun : PART_LABEL[p] || p)).join(", ") : "Server software only";
+}
+
+async function openExport(id) {
+  const s = state.servers.get(id) || {};
+  modal(`
+    <div class="modal-head"><h2>Export ${esc(s.name)}</h2><button class="modal-close">×</button></div>
+    <div class="modal-body" id="ex-body"><p class="muted"><span class="spinner"></span> Measuring the server folder…</p></div>
+    <div class="modal-foot"><span class="muted" id="ex-total"></span><div style="display:flex;gap:10px" id="ex-foot">
+      <button class="btn btn-ghost" data-x>Cancel</button>
+      <button class="btn btn-primary" id="ex-go" disabled>${ico("upload")} Export</button>
+    </div></div>`);
+  $(".modal-close").onclick = $("[data-x]").onclick = closeModal;
+  modalCleanup = () => (exView = null);
+  let plan;
+  try { plan = await API.get(`/api/servers/${id}/export`); }
+  catch (e) {
+    const b = $("#ex-body"); if (b) b.innerHTML = `<div class="banner err">${esc(e.message)}</div>`;
+    return;
+  }
+  const body = $("#ex-body");
+  if (!body) return; // closed while measuring
+  let mode = EX_MODES[lsGet("mch-export-mode")] ? lsGet("mch-export-mode") : "download";
+  const lan = (state.lan || [])[0];
+
+  body.innerHTML = `
+    <div class="form-row">
+      <label>What to take</label>
+      ${partsPickerHTML(plan, s)}
+      <div class="hint" style="margin-top:8px">Logs, backups, stats and player history stay here. So do the public address, opening hours, "start with panel" and the Java path — the other panel finds its own Java.</div>
+    </div>
+    <div id="ex-warn"></div>
+    <div class="form-row">
+      <label>Where to</label>
+      <div class="seg seg-sm" id="ex-modes" style="flex-wrap:wrap">
+        ${Object.entries(EX_MODES).map(([k, m]) => `<button class="seg-btn" data-m="${k}">${ico(m.icon)} ${esc(m.label)}</button>`).join("")}
+      </div>
+      <div id="ex-where" style="margin-top:10px"></div>
+    </div>`;
+
+  const where = () => {
+    $$("#ex-modes .seg-btn").forEach((b) => b.classList.toggle("on", b.dataset.m === mode));
+    $("#ex-where").innerHTML = mode === "download"
+      ? `<div class="hint">The zip downloads to this device. A copy stays on the panel computer under <b>Settings → Export or move</b> until you delete it, so you can send it on later.</div>`
+      : mode === "folder"
+      ? `<input type="text" id="ex-dir" class="mono" placeholder="${esc(plan.defaultDir)}" value="${esc(lsGet("mch-export-dir"))}" />
+         <div class="hint">A folder on the computer running the panel: a USB stick, a network share, or another MC Hoster's folder. Leave it empty for the panel's own <code>data/exports</code>.</div>`
+      : `<input type="text" id="ex-to" class="mono" placeholder="192.168.1.20:8100" value="${esc(lsGet("mch-send-to"))}" />
+         <div class="hint">The other panel's address. On that computer it's under <b>Settings → On your phone</b>${lan ? ` (this one is <code>${esc(lan)}</code>)` : ""}. Both computers need to be on the same network, and the server arrives there as a new server. This one isn't changed.</div>`;
+  };
+  $$("#ex-modes .seg-btn").forEach((b) => (b.onclick = () => { mode = b.dataset.m; lsSet("mch-export-mode", mode); where(); }));
+  where();
+
+  const picker = bindPartsPicker(body, plan, ({ on, bytes, noun }) => {
+    $("#ex-total").textContent = `About ${fmtBytes(bytes)} before packing`;
+    let warn = "";
+    if (plan.modded && on("world") && plan.has.content && !on("content"))
+      warn += `<div class="banner warn">The world was played with ${esc(noun.toLowerCase())}. Opening it somewhere without them deletes their blocks, items and creatures from it — for good.</div>`;
+    if (on("world") && plan.running)
+      warn += `<div class="hint">${esc(s.name)} is running, so it saves its world first and pauses autosaving until the export has it. Players stay connected.</div>`;
+    $("#ex-warn").innerHTML = warn;
+  });
+
+  const btn = $("#ex-go");
+  btn.disabled = false;
+  btn.onclick = async () => {
+    const spec = picker.opts();
+    if (mode === "folder") { spec.dir = $("#ex-dir").value.trim(); lsSet("mch-export-dir", spec.dir); }
+    if (mode === "send") {
+      spec.send = $("#ex-to").value.trim();
+      if (!spec.send) return toast("Type the other panel's address.", "err");
+      lsSet("mch-send-to", spec.send);
+    }
+    btn.disabled = true;
+    // Listening before asking: a small server can be packed before the answer lands.
+    exView = { id, mode, eid: null, started: false };
+    try {
+      await API.post(`/api/servers/${id}/export`, spec);
+      if (exView && !exView.started) paintExportProgress({ kind: "export", phase: "starting" });
+    } catch (e) { exView = { id: null }; btn.disabled = false; toast(e.message, "err"); }
+  };
+}
+
+// Sending an export that already exists, from the list in Settings.
+function openSendExport(e) {
+  const lan = (state.lan || [])[0];
+  modal(`
+    <div class="modal-head"><h2>Send to another panel</h2><button class="modal-close">×</button></div>
+    <div class="modal-body" id="ex-body">
+      <p class="muted" style="margin-top:0">${esc(e.serverName)} · ${esc(fmtWhen(e.created))} · ${fmtBytes(e.size)}</p>
+      <div class="form-row"><label>The other panel's address</label>
+        <input type="text" id="ex-to" class="mono" placeholder="192.168.1.20:8100" value="${esc(lsGet("mch-send-to"))}" />
+        <div class="hint">On that computer it's under <b>Settings → On your phone</b>${lan ? ` (this one is <code>${esc(lan)}</code>)` : ""}. The server arrives there as a new server.</div></div>
+    </div>
+    <div class="modal-foot"><span class="muted" id="ex-total"></span><div style="display:flex;gap:10px" id="ex-foot">
+      <button class="btn btn-ghost" data-x>Cancel</button>
+      <button class="btn btn-primary" id="ex-go">${ico("globe")} Send</button>
+    </div></div>`);
+  $(".modal-close").onclick = $("[data-x]").onclick = closeModal;
+  modalCleanup = () => (exView = null);
+  $("#ex-to").focus();
+  $("#ex-go").onclick = async () => {
+    const to = $("#ex-to").value.trim();
+    if (!to) return toast("Type the other panel's address.", "err");
+    lsSet("mch-send-to", to);
+    $("#ex-go").disabled = true;
+    exView = { id: e.serverId, mode: "send", eid: e.id, started: false };
+    try {
+      await API.post(`/api/exports/${encodeURIComponent(e.id)}/send`, { to });
+      if (exView && !exView.started) paintExportProgress({ kind: "send", phase: "connecting", to });
+    } catch (err) { exView = { id: null }; $("#ex-go").disabled = false; toast(err.message, "err"); }
+  };
+}
+
+// The dialog's body once the work has started. `job` is an export job
+// ({phase, done, total}) or a send ({phase, sent, total}).
+function paintExportProgress(job) {
+  const body = $("#ex-body");
+  if (!body || !exView) return;
+  exView.started = true;
+  $("#ex-total").textContent = "";
+  $("#ex-foot").innerHTML = `<button class="btn btn-ghost" data-x>Close</button>`;
+  $("#ex-foot [data-x]").onclick = closeModal;
+  const sending = job.sent != null || job.kind === "send";
+  const frac = sending ? (job.total ? job.sent / job.total : 0) : job.phase === "zipping" && job.total ? job.done / job.total : 0;
+  const detail = sending
+    ? job.phase === "sending" ? ` · ${fmtBytes(job.sent || 0)} of ${fmtBytes(job.total)}` : "…"
+    : job.phase === "zipping" && job.total ? ` · ${job.done.toLocaleString()} of ${job.total.toLocaleString()} files` : "…";
+  const to = job.to || (exView.mode === "send" ? lsGet("mch-send-to") : "");
+  body.innerHTML = `
+    <p style="margin-top:0">${sending ? `Sending to <code>${esc(job.host || to)}</code>.` : "Packing the server into a zip."} You can close this — it carries on, and the console says when it's done.</p>
+    <div class="fm-prog"><div class="fm-prog-track"><i style="width:${Math.max(4, frac * 100).toFixed(1)}%"></i></div>
+      <span class="fm-prog-text">${esc(EX_PHASE[job.phase] || job.phase)}${detail}</span></div>`;
+}
+
+function paintExportDone(r) {
+  const body = $("#ex-body");
+  if (!body || !exView) return;
+  exView.started = true;
+  $("#ex-total").textContent = "";
+  $("#ex-foot").innerHTML = `<button class="btn btn-ghost" data-x>Close</button>`;
+  $("#ex-foot [data-x]").onclick = closeModal;
+  if (!r.ok) {
+    body.innerHTML = `<div class="banner err">${esc(r.error)}</div>`;
+    return;
+  }
+  if (r.kind === "send") {
+    body.innerHTML = `
+      <div class="banner ex-done">${ico("check")} <b>${esc(r.name)}</b> arrived on ${esc(r.host || r.to)} and is unpacking there now. It shows up there as a new server; accept the EULA if asked, then hit Start.</div>
+      <a class="btn" href="${esc(r.url)}" target="_blank" rel="noopener">${ico("external")} Open it on the other panel</a>`;
+    return;
+  }
+  const e = r.export;
+  exView.eid = e.id;
+  if (exView.mode === "send") return; // the send carries on; its events paint the rest
+  const dl = `/api/exports/${encodeURIComponent(e.id)}`;
+  body.innerHTML = exView.mode === "folder"
+    ? `<div class="banner ex-done">${ico("check")} Saved ${fmtBytes(e.size)} to <code>${esc(e.path)}</code>.</div>
+       <div class="hint">To bring it in on another MC Hoster, use <b>Import</b> on its dashboard and give it this file.</div>`
+    : `<div class="banner ex-done">${ico("check")} Exported ${fmtBytes(e.size)} — ${e.files.toLocaleString()} files.</div>
+       <a class="btn btn-primary" href="${dl}" download>${ico("download")} Download again</a>
+       <div class="hint" style="margin-top:10px">To bring it in on another MC Hoster, use <b>Import</b> on its dashboard and give it this file.</div>`;
+  if (exView.mode === "download") {
+    const a = document.createElement("a");
+    a.href = dl; a.download = e.file; document.body.appendChild(a); a.click(); a.remove();
+  }
+}
+
+function onTransferEvent(e) {
+  const name = (state.servers.get(e.id) || {}).name || "Server";
+  const mine = exView && exView.id === e.id;
+  if (e.received) toast(`Receiving ${e.received.name}${e.received.from ? ` from ${e.received.from}` : ""}…`, "ok");
+  if (mine && e.job) paintExportProgress(e.job);
+  if (mine && e.send && (!exView.eid || exView.eid === e.send.eid)) { exView.eid = e.send.eid; paintExportProgress(e.send); }
+  const r = e.result;
+  if (r) {
+    if (mine && (r.kind !== "send" || r.eid === exView.eid)) paintExportDone(r);
+    else if (r.kind === "send") toast(r.ok ? `${name} arrived on ${r.host || r.to}.` : `${name}: sending failed — ${r.error}`, r.ok ? "ok" : "err");
+    else toast(r.ok ? `${name}: exported.` : `${name}: export failed — ${r.error}`, r.ok ? "ok" : "err");
+  }
+  if (state.route.name === "server" && state.route.id === e.id && $("#st-exports")) {
+    if (r) loadServerExports(e.id);
+    else if (e.send) paintSendRow(e.send);
+  }
+}
+
+// Settings → Export or move: this server's exports, wherever they were saved.
+async function loadServerExports(id) {
+  const box = $("#st-exports");
+  if (!box) return;
+  let data;
+  try { data = await API.get("/api/exports"); }
+  catch (e) { box.innerHTML = `<div class="banner err">${esc(e.message)}</div>`; return; }
+  if (!$("#st-exports")) return;
+  const s = state.servers.get(id) || {};
+  const noun = s.content && s.content.folder !== "datapacks" ? s.content.noun : "Mods";
+  const list = data.exports.filter((x) => x.serverId === id);
+  if (!list.length) { box.innerHTML = ""; return; }
+  box.innerHTML = `<div class="file-table" style="margin-top:12px">${list.map((x, i) => `
+    <div class="file-row bk-row" data-eid="${esc(x.id)}">
+      <span class="fic">${ico("archive")}</span>
+      <span class="fname"><b>${esc(fmtWhen(x.created))}</b>
+        <span class="muted">${esc(partsText(x.parts, noun))} · ${fmtBytes(x.size)}${x.external ? ` · <span class="mono">${esc(x.path)}</span>` : ""}</span>
+        <span class="muted ex-sending" hidden></span></span>
+      <div class="bk-acts">
+        <a class="btn btn-sm btn-ghost" href="/api/exports/${encodeURIComponent(x.id)}" download title="Download the zip">${ico("download")}</a>
+        <button class="btn btn-sm" data-send="${i}">${ico("globe")} Send…</button>
+        <span class="fdel" data-del="${i}" title="Delete">${ico("trash")}</span>
+      </div>
+    </div>`).join("")}</div>`;
+  $$("[data-send]", box).forEach((b) => (b.onclick = () => openSendExport(list[Number(b.dataset.send)])));
+  $$("[data-del]", box).forEach((el) => (el.onclick = async () => {
+    const x = list[Number(el.dataset.del)];
+    if (!(await confirmDialog("Delete export?", `<p>Delete the export from <b>${esc(fmtWhen(x.created))}</b>${x.external ? ` at <code>${esc(x.path)}</code>` : ""}? The server itself isn't touched.</p>`, "Delete"))) return;
+    try { await API.del(`/api/exports/${encodeURIComponent(x.id)}`); loadServerExports(id); }
+    catch (err) { toast(err.message, "err"); }
+  }));
+  for (const job of data.sending || []) paintSendRow(job);
+}
+
+function paintSendRow(job) {
+  const row = $(`#st-exports [data-eid="${CSS.escape(job.eid)}"]`);
+  if (!row) return;
+  const line = $(".ex-sending", row);
+  line.hidden = false;
+  line.textContent = job.phase === "sending" && job.total
+    ? `Sending to ${job.host || job.to} · ${Math.floor((job.sent / job.total) * 100)}%`
+    : `${EX_PHASE[job.phase] || job.phase} · ${job.to}`;
+  const b = $("[data-send]", row);
+  if (b) b.disabled = true;
+}
+
+/* Import: a zip from this device, a path on the panel computer, or an export
+ * this panel already has. Staged first, so you see what's in it and pick its
+ * name and port before a server is made. */
+async function openImport() {
+  let token = null; // a staged upload not yet imported, cancelled if the dialog closes
+  let xhr = null;
+  modal(`
+    <div class="modal-head"><h2>Import a server</h2><button class="modal-close">×</button></div>
+    <div class="modal-body" id="im-body"></div>
+    <div class="modal-foot"><span class="muted" id="im-note"></span><div style="display:flex;gap:10px" id="im-foot"></div></div>`);
+  $(".modal-close").onclick = closeModal;
+  modalCleanup = () => {
+    if (xhr) xhr.abort();
+    if (token) API.post("/api/import/cancel", { token }).catch(() => {});
+  };
+
+  const pickSource = async () => {
+    token = null;
+    const lan = (state.lan || [])[0];
+    $("#im-note").textContent = "";
+    $("#im-foot").innerHTML = `<button class="btn btn-ghost" data-x>Cancel</button>`;
+    $("#im-foot [data-x]").onclick = closeModal;
+    $("#im-body").innerHTML = `
+      <label class="im-drop" id="im-drop">
+        <input type="file" id="im-file" accept=".zip,application/zip" hidden />
+        <span class="im-drop-ic">${ico("upload")}</span>
+        <b>Drop an export here, or choose the file</b>
+        <span class="muted">A <code>.zip</code> made with <b>Export</b> on any MC Hoster</span>
+      </label>
+      <div class="form-row" style="margin-top:16px"><label>Or a file on the panel computer</label>
+        <div style="display:flex;gap:8px"><input type="text" id="im-path" class="mono" placeholder="D:\\Minecraft exports\\Survival_2026-10-20.zip" />
+          <button class="btn" id="im-path-go">Open</button></div>
+        <div class="hint">Quicker for a big world: nothing goes through the browser.</div></div>
+      <div id="im-local"></div>
+      <div class="hint" style="margin-top:14px">Moving from another panel on your network? On that one, open the server's <b>Settings → Export or move</b>, choose <b>Send to another panel</b> and give it ${lan ? `<code>${esc(lan)}</code>` : "this panel's address"}. It arrives here without this dialog.</div>`;
+    const drop = $("#im-drop"), file = $("#im-file");
+    file.onchange = () => file.files[0] && upload(file.files[0]);
+    drop.addEventListener("dragover", (ev) => { ev.preventDefault(); drop.classList.add("over"); });
+    drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+    drop.addEventListener("drop", (ev) => {
+      ev.preventDefault();
+      drop.classList.remove("over");
+      const f = ev.dataTransfer.files[0];
+      if (f) upload(f);
+    });
+    const byPath = async () => {
+      const p = $("#im-path").value.trim();
+      if (!p) return;
+      try { show(await API.post("/api/import/inspect", { path: p })); } catch (e) { toast(e.message, "err"); }
+    };
+    $("#im-path-go").onclick = byPath;
+    $("#im-path").onkeydown = (ev) => { if (ev.key === "Enter") byPath(); };
+
+    // Exports this panel made — handy to bring back a server that was deleted.
+    try {
+      const { exports } = await API.get("/api/exports");
+      const box = $("#im-local");
+      if (!box || !exports.length) return;
+      box.innerHTML = `<div class="form-row" style="margin-top:4px"><label>Or an export on this panel</label>
+        <div class="file-table">${exports.slice(0, 8).map((x, i) => `
+          <div class="file-row bk-row">
+            <span class="fic">${ico("archive")}</span>
+            <span class="fname"><b>${esc(x.serverName)}</b>
+              <span class="muted">${esc(fmtWhen(x.created))} · ${esc(cap(x.modLoader || x.loader))} ${esc(x.mc)} · ${fmtBytes(x.size)}${state.servers.has(x.serverId) ? "" : " · deleted since"}</span></span>
+            <div class="bk-acts"><button class="btn btn-sm" data-pick="${i}">Use</button></div>
+          </div>`).join("")}</div></div>`;
+      $$("[data-pick]", box).forEach((b) => (b.onclick = async () => {
+        try { show(await API.post("/api/import/inspect", { export: exports[Number(b.dataset.pick)].id })); } catch (e) { toast(e.message, "err"); }
+      }));
+    } catch {}
+  };
+
+  const upload = (f) => {
+    if (!/\.zip$/i.test(f.name)) return toast("That isn't a .zip — pick an export made with MC Hoster.", "err");
+    $("#im-body").innerHTML = `
+      <p style="margin-top:0">Uploading <b>${esc(f.name)}</b> (${fmtBytes(f.size)})…</p>
+      <div class="fm-prog"><div class="fm-prog-track"><i id="im-fill" style="width:2%"></i></div><span class="fm-prog-text" id="im-prog">0%</span></div>`;
+    const req = (xhr = new XMLHttpRequest());
+    req.open("POST", `/api/import/upload?name=${encodeURIComponent(f.name)}`);
+    req.upload.onprogress = (ev) => {
+      if (!ev.lengthComputable || !$("#im-fill")) return;
+      const pct = (ev.loaded / ev.total) * 100;
+      $("#im-fill").style.width = Math.max(2, pct).toFixed(1) + "%";
+      $("#im-prog").textContent = pct >= 100 ? "Reading it…" : `${Math.floor(pct)}% · ${fmtBytes(ev.loaded)}`;
+    };
+    req.onload = () => {
+      xhr = null;
+      let data = {};
+      try { data = JSON.parse(req.responseText); } catch {}
+      if (req.status !== 200 || !data.token) { toast(data.error || `Upload failed (HTTP ${req.status})`, "err"); return pickSource(); }
+      show(data);
+    };
+    req.onerror = () => { xhr = null; toast("The upload was cut off.", "err"); pickSource(); };
+    req.send(f);
+  };
+
+  const show = (info) => {
+    token = info.token;
+    const body = $("#im-body");
+    if (!body) return;
+    const noun = ["paper", "purpur"].includes(info.modLoader || info.loader) ? "Plugins" : "Mods";
+    const o = info.original;
+    body.innerHTML = `
+      <div class="im-sum">
+        <div class="srv-card-emoji">${initialTile(o.name)}</div>
+        <div><b>${esc(o.name)}</b>
+          <div class="row" style="margin-top:4px">
+            <span class="badge loader">${esc(cap(info.modLoader || info.loader))}</span>
+            <span class="badge mc">${esc(info.mc)}</span>
+            ${info.pack ? `<span class="badge">${esc(info.pack.name || "Modpack")}</span>` : ""}
+          </div>
+          <div class="muted" style="font-size:12px;margin-top:6px">${esc(partsText(info.parts, noun))} · ${fmtBytes(info.size)}${o.host ? ` · from ${esc(o.host)}` : ""}${o.exportedAt ? ` · exported ${esc(fmtWhen(o.exportedAt))}` : ""}</div>
+        </div>
+      </div>
+      <div class="two-col" style="margin-top:16px">
+        <div class="form-row"><label>Name</label><input type="text" id="im-name" maxlength="64" value="${esc(info.name)}" /></div>
+        <div class="form-row"><label>Game port</label><input type="number" id="im-port" min="1" max="65535" value="${info.port}" />
+          ${o.port && o.port !== info.port ? `<div class="hint">It used ${o.port} before, which a server here already has.</div>` : ""}</div>
+      </div>
+      ${info.parts.includes("world") ? "" : `<div class="hint">No world in this export — it makes a fresh one on first start.</div>`}
+      ${info.otherPlatform ? `<div class="hint" style="margin-top:8px">Exported on a different kind of computer. That's fine: the panel picks the right Java here, downloading it if needed.</div>` : ""}`;
+    $("#im-foot").innerHTML = `<button class="btn btn-ghost" id="im-back">← Back</button><button class="btn btn-primary" id="im-go">${ico("download")} Import</button>`;
+    $("#im-back").onclick = () => { API.post("/api/import/cancel", { token }).catch(() => {}); pickSource(); };
+    $("#im-go").onclick = async () => {
+      $("#im-go").disabled = true;
+      try {
+        const r = await API.post("/api/import", { token, name: $("#im-name").value.trim(), port: Number($("#im-port").value) });
+        token = null;
+        state.servers.set(r.server.id, r.server);
+        closeModal();
+        toast(`Importing ${r.server.name}…`, "ok");
+        state.activeTab = "console"; // the unpacking shows on its console
+        go("#/server/" + r.server.id);
+      } catch (e) {
+        $("#im-go").disabled = false;
+        toast(e.message, "err");
+        if (/expired/.test(e.message)) pickSource();
+      }
+    };
+  };
+
+  pickSource();
 }
 
 // Opening hours for a server: weekday chips and a from/to pair per window. The

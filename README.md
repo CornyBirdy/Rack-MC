@@ -328,6 +328,10 @@ modpack stays.
 - **Duplicate** — the copy button beside Start (or **Settings → Duplicate**)
   makes a new server from this one. See below.
 
+- **Export / Import** — **Settings → Export or move** packs a server into a
+  zip or sends it straight to another MC Hoster; **Import** on the dashboard
+  brings one in. See below.
+
 ## Duplicating a server
 
 Handy for a test copy before updating mods, a creative copy of a survival
@@ -361,6 +365,48 @@ without installing anything.
   stay connected. While the copy runs, the original can't be started, restored
   or deleted.
 - The copy shows as *Installing*, with its progress on its console.
+
+## Moving a server to another panel
+
+A server can leave this MC Hoster for another one: a new PC, a second install
+on the same machine, or a mini PC that stays on. **Settings → Export or
+move → Export…** packs it into a zip, picking the same parts as a duplicate
+(world, mods/plugins, configs, player lists; the server software always comes,
+so nothing is reinstalled at the other end). Then choose where it goes:
+
+| Where to | What happens |
+|---|---|
+| **Download** | the zip downloads to the device you're using |
+| **Save to a folder** | the zip is written to a folder on the panel computer: a USB stick, a network share, another MC Hoster's folder |
+| **Send to another panel** | type the other panel's address (`192.168.1.20:8100`, or just the IP for the default port) and the zip is uploaded there and imported as a new server, with no dialog on the other side |
+
+On the receiving panel, **Import** on the dashboard takes a zip dropped from
+the browser, a path on that computer (quicker for big worlds, since nothing
+goes through the browser), or one of the exports the panel already has. It
+shows what's inside, lets you pick the name and port, and unpacks it with
+progress on the new server's console, the same way an install does. A port
+or name already in use here moves to the next free one.
+
+- **What travels:** RAM, JVM args, max players, the icon, sleep, restart and
+  backup settings, the Modrinth manifest (so the Mods tab still knows what's
+  installed) and voice chat when the mods come too.
+- **What stays:** the Java path (the other panel finds or downloads the right
+  Java itself), the public address, scheduled uptime, *start with panel*,
+  backups, stats and player history. The original server isn't changed. Delete
+  it yourself once the copy runs where it should.
+- **Windows ↔ Linux:** Forge and NeoForge launch from an args file named for
+  the system they were installed on. If an export moves between the two, the
+  panel switches to the other file the installer left beside it.
+- A running server can be exported. As with a backup, its world is saved first
+  and autosave paused until the zip has it, and players stay connected.
+- The zip is ordinary: `mchoster.json` (what the server is) and `server/` (its
+  folder). Exports made here are listed under **Export or move** with
+  **Download**, **Send…** and delete, and stay in `data/exports/` (or the folder
+  you chose) until you delete them. Uploads waiting to be imported sit in
+  `data/imports/` and are cleared when the panel restarts.
+- Sending needs both computers on the same network and the other panel
+  reachable (Windows may ask to let Node.js through its firewall the first
+  time). There is no login on either end, so keep this to your home network.
 
 ## Server stats
 
@@ -612,12 +658,13 @@ MC_hoster/
 │  ├─ java.js           Java discovery, version matching, JRE downloads
 │  ├─ loaders.js        per-loader version lists + install logic
 │  ├─ modrinth.js       Modrinth search/install, content manifest, .mrpack packs
-│  ├─ zip.js            read-only zip reader (zlib only) for .mrpack files
+│  ├─ zip.js            zip reader / writer (zlib only): packs, backups, exports
 │  ├─ playit.js         playit.gg agent, account link, per-server tunnels
 │  ├─ voicechat.js      Simple Voice Chat switch: install, voice port, config
 │  ├─ manager.js        server lifecycle, console, players
 │  ├─ backup.js         world / full backups, restores, the backup schedule
 │  ├─ duplicate.js      copy a server, choosing world / mods / configs / players
+│  ├─ transfer.js       export / import a server, and send one to another panel
 │  ├─ host.js           keeper process that holds one server across panel restarts
 │  ├─ hosted.js         the panel's side of host.js: launch, reconnect, talk
 │  ├─ uptime.js         scheduled uptime: opening-hours windows and their edges
@@ -633,6 +680,8 @@ MC_hoster/
 │  ├─ stats/<id>.json   that server's stats history (1 h / 24 h / 7 d) + lag spikes
 │  ├─ run/              live server hosts: state, last exit, host logs
 │  ├─ runtimes/         Java runtimes the panel downloaded for you
+│  ├─ exports/          server exports made here (plus index.json)
+│  ├─ imports/          uploads waiting to be imported (cleared on restart)
 │  └─ playit/           playit agent binary + your agent key
 ├─ rack.json            Rack manifest
 ├─ multiapp.json        legacy controller manifest
