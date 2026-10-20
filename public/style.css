@@ -1361,6 +1361,28 @@ input[type="time"] {
 #dup-warn .banner { margin: 12px 0 0; }
 #dup-warn .hint { margin-top: 10px; }
 
+/* ---- export / import ---- */
+.empty .empty-alt { margin: 14px 0 0; font-size: 12.5px; }
+.empty-alt a { color: var(--accent-text); text-decoration: underline; text-underline-offset: 2px; }
+#ex-modes .seg-btn .i { vertical-align: -2px; }
+#ex-where input, #im-path { width: 100%; }
+.banner.ex-done { border: 1px solid var(--hairline); background: var(--surface-sunken); }
+.banner.ex-done > .i { color: var(--accent-text); vertical-align: -2px; }
+.ex-sending { color: var(--accent-text) !important; }
+.im-drop {
+  display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 28px 16px; text-align: center; cursor: pointer;
+  border: 1px dashed var(--border-control); border-radius: var(--radius-card); background: var(--surface-sunken);
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+.im-drop:hover, .im-drop.over { border-color: var(--accent); background: var(--accent-soft); }
+.im-drop b { font-size: 13.5px; color: var(--ink); }
+.im-drop .muted { font-size: 12px; }
+.im-drop-ic { color: var(--accent-text); }
+.im-drop-ic .i { width: 22px; height: 22px; }
+.form-row label.im-drop { display: flex; margin: 0; font-weight: 400; }
+.im-sum { display: flex; gap: 14px; align-items: flex-start; padding: 14px; border: 1px solid var(--hairline); border-radius: var(--radius-card); background: var(--surface-sunken); }
+.im-sum .row { display: flex; gap: 6px; flex-wrap: wrap; }
+
 /* One focus ring everywhere, keyboard or not: 2px of the accent text colour, 2px out. */
 :focus-visible { outline: 2px solid var(--accent-text) !important; outline-offset: 2px !important; }
 /* the console's command line sits flush in its frame, so the frame shows focus */

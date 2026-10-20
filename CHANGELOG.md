@@ -10,6 +10,17 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Move a server to another panel.** **Settings → Export or move** packs a
+  server into a zip, with the same choice of world, mods, configs and player
+  lists as Duplicate. Download it, save it to a folder on the panel computer
+  (a USB stick, a network share), or **send it to another MC Hoster** on your
+  network by typing its address. It arrives there as a new server. **Import**
+  on the dashboard brings one in from a dropped file, a path on the panel
+  computer, or an earlier export, and lets you pick its name and port first.
+  Settings travel with it, but the Java path, public address and opening
+  hours stay behind. Forge and NeoForge servers moved between Windows and
+  Linux switch to the right launch file by themselves.
+
 - **Duplicate a server.** The new copy button beside Start (also in
   **Settings → Duplicate**) makes a new server from an existing one. You pick
   what comes along: the **world**, the **mods** (or plugins), the **configs**

@@ -25,6 +25,7 @@ const backup = require("./lib/backup");
 const voicechat = require("./lib/voicechat");
 const uptime = require("./lib/uptime");
 const duplicate = require("./lib/duplicate");
+const transfer = require("./lib/transfer");
 
 // Port precedence: explicit flag, then the launcher's MC_PORT (our portEnv),
 // then whatever Rack/the old controller assigned, then the standalone default.
@@ -399,6 +400,65 @@ const server = http.createServer(async (req, res) => {
       return sendJSON(res, 200, store.setSettings(patch));
     }
 
+    // ---- moving servers between panels ----
+    // GET    /api/transfer/hello              "an MC Hoster that takes imports lives here"
+    // GET    /api/exports                     every export this panel made
+    // GET    /api/exports/:eid                download one
+    // POST   /api/exports/:eid/send {to}      upload it to another panel and import it there
+    // DELETE /api/exports/:eid
+    // POST   /api/import/upload?name=&from=   (raw zip body) stage an upload, read its manifest
+    // POST   /api/import/inspect {path}|{export}  stage a zip on this computer
+    // POST   /api/import {token, name, port}|{token, auto}  make the server
+    // POST   /api/import/cancel {token}       forget a staged upload
+    if (p === "/api/transfer/hello" && req.method === "GET")
+      return sendJSON(res, 200, transfer.helloInfo());
+
+    if (p === "/api/exports" && req.method === "GET")
+      return sendJSON(res, 200, { exports: transfer.exportsOf(null), sending: transfer.sending() });
+
+    if (parts[1] === "exports" && parts[2]) {
+      const eid = parts[2];
+      if (!parts[3] && req.method === "GET")
+        return guard(async () => {
+          const { stream, size, file } = transfer.openExport(eid);
+          res.writeHead(200, {
+            "Content-Type": "application/zip",
+            "Content-Length": size,
+            "Content-Disposition": `attachment; filename="${file.replace(/"/g, "")}"`,
+          });
+          stream.pipe(res);
+          stream.on("error", () => res.destroy());
+        })(req, res);
+      if (parts[3] === "send" && req.method === "POST")
+        return guard(async () => {
+          const body = await readJSONBody(req);
+          const to = transfer.normalizeUrl(body.to);
+          transfer.send(eid, to).catch(() => {});
+          sendJSON(res, 200, { ok: true, to });
+        })(req, res);
+      if (!parts[3] && req.method === "DELETE")
+        return guard(async () => sendJSON(res, 200, transfer.removeExport(eid)))(req, res);
+    }
+
+    if (p === "/api/import/upload" && req.method === "POST")
+      return guard(async () => sendJSON(res, 200, await transfer.stageUpload(req, { from: q.get("from") })))(req, res);
+
+    if (p === "/api/import/inspect" && req.method === "POST")
+      return guard(async () => {
+        const body = await readJSONBody(req);
+        sendJSON(res, 200, body.export ? await transfer.stageExport(String(body.export)) : await transfer.stagePath(body.path));
+      })(req, res);
+
+    if (p === "/api/import/cancel" && req.method === "POST")
+      return guard(async () => sendJSON(res, 200, transfer.cancelStaged(String((await readJSONBody(req)).token || ""))))(req, res);
+
+    if (p === "/api/import" && req.method === "POST")
+      return guard(async () => {
+        const body = await readJSONBody(req);
+        const def = transfer.startImport(String(body.token || ""), body);
+        sendJSON(res, 200, { server: manager.summary(def.id) });
+      })(req, res);
+
     // ---- servers collection ----
     if (p === "/api/servers" && req.method === "GET")
       return sendJSON(res, 200, { servers: manager.listSummaries() });
@@ -477,7 +537,11 @@ const server = http.createServer(async (req, res) => {
       if (!action && req.method === "DELETE") {
         const job = manager.slot(id).backup;
         if (job)
-          return sendJSON(res, 400, { error: job.kind === "copy" ? "Wait for the copy of this server to finish." : "Wait for the running backup or restore to finish." });
+          return sendJSON(res, 400, {
+            error: job.kind === "copy" ? "Wait for the copy of this server to finish."
+              : job.kind === "export" ? "Wait for the export of this server to finish."
+              : "Wait for the running backup or restore to finish.",
+          });
         const out = manager.destroy(id);
         try { backup.forget(id); } catch (e) { console.error("[hoster] could not remove backups:", e.message); }
         return sendJSON(res, 200, out);
@@ -504,6 +568,15 @@ const server = http.createServer(async (req, res) => {
           const copy = duplicate.duplicate(id, body);
           sendJSON(res, 200, { server: manager.summary(copy.id) });
         })(req, res);
+
+      // ---- export ----
+      // GET  /api/servers/:id/export — what there is to take, how big, earlier exports
+      // POST /api/servers/:id/export {world, content, config, players, dir, send}
+      // Progress rides `transfer` events; with `send` the file goes on to that panel.
+      if (action === "export" && req.method === "GET")
+        return guard(async () => sendJSON(res, 200, await transfer.plan(id)))(req, res);
+      if (action === "export" && req.method === "POST")
+        return guard(async () => sendJSON(res, 200, transfer.startExport(id, await readJSONBody(req))))(req, res);
 
       if (action === "command" && req.method === "POST") {
         const body = await readJSONBody(req);
@@ -778,6 +851,10 @@ const server = http.createServer(async (req, res) => {
     res.end(data);
   });
 });
+
+// Exports and imports stream gigabytes; Node's default five-minute limit on a
+// whole request would cut a big world off halfway through its upload.
+server.requestTimeout = 0;
 
 server.listen(PORT, async () => {
   const url = `http://localhost:${PORT}`;
