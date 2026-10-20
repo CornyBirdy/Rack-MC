@@ -1,35 +1,35 @@
 /* ============================================================= MC Hoster UI */
 /* ---------------------------------------------------------------- theme tokens
-   Rack Suite "Twilight" palette. Dark is the primary theme; light is the
+   Rack Suite "Twilight" palette (v2: deeper, less pastel dark; a calmer light). Dark is the primary theme; light is the
    secondary one. Every colour in this file comes from these tokens. */
 /* A console keeps the dark tokens in both themes, head and input line included. */
 :root,
 [data-theme="dark"],
 .console {
   color-scheme: dark;
-  --ground: #22242b;
-  --surface-sunken: #282a31;
-  --surface: #2e3038;
-  --surface-raised: #373941;
-  --surface-track: #44464e;
-  --hairline: #40424a;
-  --border-control: #9a9eab;
-  --ink: #e6e7ed;
-  --ink-muted: #bbbdc7;
-  --accent: #61c7c7;
-  --on-accent: #031a1a;
-  --accent-text: #75d3d3;
-  --accent-soft: rgba(97, 199, 199, 0.14);
-  --accent-2: #9ba7e1;
-  --accent-3: #d7a583;
-  --success: #80cdb0;
-  --success-soft: rgba(128, 205, 176, 0.14);
-  --warning: #e0bb6e;
-  --warning-soft: rgba(224, 187, 110, 0.14);
-  --danger: #f4a6af;
-  --danger-soft: rgba(244, 166, 175, 0.14);
-  --info: #95b9e6;
-  --info-soft: rgba(149, 185, 230, 0.14);
+  --ground: #1b1d23;
+  --surface-sunken: #202228;
+  --surface: #262830;
+  --surface-raised: #2f323b;
+  --surface-track: #3b3e48;
+  --hairline: #363943;
+  --border-control: #8b90a0;
+  --ink: #eceef4;
+  --ink-muted: #a9adbb;
+  --accent: #1fb8b1;
+  --on-accent: #001c1b;
+  --accent-text: #3fd0c8;
+  --accent-soft: rgba(31, 184, 177, 0.16);
+  --accent-2: #7d8cf5;
+  --accent-3: #f0915a;
+  --success: #34c48b;
+  --success-soft: rgba(52, 196, 139, 0.15);
+  --warning: #f2b33d;
+  --warning-soft: rgba(242, 179, 61, 0.15);
+  --danger: #f25f73;
+  --danger-soft: rgba(242, 95, 115, 0.15);
+  --info: #4fa3f7;
+  --info-soft: rgba(79, 163, 247, 0.15);
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
   --shadow-overlay: 0 12px 32px -16px rgba(0, 0, 0, 0.8);
   --scrim: rgba(0, 0, 0, 0.55);
@@ -37,32 +37,32 @@
 
 [data-theme="light"] {
   color-scheme: light;
-  --ground: #eef0f7;
-  --surface-sunken: #e7e9f0;
-  --surface: #f9fafe;
-  --surface-raised: #eceef5;
-  --surface-track: #dcdee5;
-  --hairline: #d9dae1;
-  --border-control: #777a87;
-  --ink: #232630;
-  --ink-muted: #545764;
-  --accent: #6bcac9;
-  --on-accent: #031a1a;
-  --accent-text: #006768;
-  --accent-soft: rgba(107, 202, 201, 0.16);
-  --accent-2: #5c69bc;
-  --accent-3: #9f6d4b;
-  --success: #1f6f54;
-  --success-soft: rgba(31, 111, 84, 0.1);
-  --warning: #7a5a14;
-  --warning-soft: rgba(122, 90, 20, 0.1);
-  --danger: #a83a4d;
-  --danger-soft: rgba(168, 58, 77, 0.1);
-  --info: #2f5f9c;
-  --info-soft: rgba(47, 95, 156, 0.1);
-  --shadow: 0 1px 2px rgba(20, 24, 28, 0.12), 0 1px 3px rgba(20, 24, 28, 0.08);
-  --shadow-overlay: 0 12px 32px -12px rgba(20, 24, 28, 0.28);
-  --scrim: rgba(35, 38, 48, 0.4);
+  --ground: #e6e8ee;
+  --surface-sunken: #dfe2e9;
+  --surface: #f0f1f5;
+  --surface-raised: #e8eaf0;
+  --surface-track: #d4d7df;
+  --hairline: #d2d5dd;
+  --border-control: #8d919e;
+  --ink: #2c2f38;
+  --ink-muted: #626674;
+  --accent: #22a9a3;
+  --on-accent: #002321;
+  --accent-text: #0b726d;
+  --accent-soft: rgba(34, 169, 163, 0.15);
+  --accent-2: #5160cc;
+  --accent-3: #b5652f;
+  --success: #1d7f5c;
+  --success-soft: rgba(29, 127, 92, 0.11);
+  --warning: #8c6510;
+  --warning-soft: rgba(140, 101, 16, 0.11);
+  --danger: #c0435a;
+  --danger-soft: rgba(192, 67, 90, 0.11);
+  --info: #2f6fbf;
+  --info-soft: rgba(47, 111, 191, 0.11);
+  --shadow: 0 1px 2px rgba(30, 34, 44, 0.08), 0 1px 3px rgba(30, 34, 44, 0.06);
+  --shadow-overlay: 0 12px 32px -12px rgba(30, 34, 44, 0.22);
+  --scrim: rgba(44, 47, 56, 0.35);
 }
 
 :root {
@@ -131,10 +131,9 @@ a { color: inherit; text-decoration: none; }
   gap: 12px;
 }
 .brand { display: flex; align-items: center; gap: 12px; padding: 4px 8px; }
-.brand-mark {
-  width: 34px; height: 34px; border-radius: var(--radius-control); display: grid; place-items: center;
-  color: var(--accent-text); background: var(--surface-raised); border: 1px solid var(--border-control);
-}
+/* the suite mark: the same tile as the app icon */
+.brand-mark { width: 34px; height: 34px; flex-shrink: 0; }
+.brand-mark img { display: block; width: 34px; height: 34px; border-radius: 9px; box-shadow: var(--ring-soft); }
 .brand-text { display: flex; flex-direction: column; line-height: 1.15; }
 .brand-text strong { font-size: 14.5px; font-weight: 600; letter-spacing: 0; }
 .brand-text span { font-size: 11px; color: var(--ink-muted); }
@@ -371,9 +370,9 @@ select { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmln
 
 /* -------------------------------------------------------------------- modal */
 #modal-root:empty { display: none; }
-.modal-bg { position: fixed; inset: 0; background: var(--scrim); backdrop-filter: blur(4px); display: grid; place-items: center; z-index: 50; padding: 20px; animation: fade 0.15s; }
+.modal-bg { position: fixed; inset: 0; background: var(--scrim); backdrop-filter: blur(4px); display: grid; place-items: center; z-index: 50; padding: 20px; animation: fade 0.16s ease-out; }
 @keyframes fade { from { opacity: 0; } }
-.modal { background: var(--surface-raised); border: 1px solid var(--hairline); border-radius: var(--radius-overlay); width: 100%; max-width: 640px; max-height: 88vh; display: flex; flex-direction: column; box-shadow: var(--shadow-overlay); animation: pop 0.16s; }
+.modal { background: var(--surface-raised); border: 1px solid var(--hairline); border-radius: var(--radius-overlay); width: 100%; max-width: 640px; max-height: 88vh; display: flex; flex-direction: column; box-shadow: var(--shadow-overlay); animation: pop 0.2s cubic-bezier(0.2, 0.8, 0.2, 1); }
 .modal.wide { max-width: 820px; }
 @keyframes pop { from { transform: scale(0.97) translateY(8px); opacity: 0; } }
 .modal-head { padding: 16px 20px; border-bottom: 1px solid var(--hairline); display: flex; align-items: center; justify-content: space-between; }
@@ -1014,7 +1013,6 @@ select { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmln
 .srv-mini .emoji .itile { font-size: 12.5px; }
 .srv-card-emoji .itile { font-size: 17px; }
 .srv-header .emoji .itile { font-size: 19px; }
-.brand-mark .i { width: 19px; height: 19px; vertical-align: 0; }
 
 /* ---------------------------------------------------------------- stats tab */
 /* Tiles for the latest reading, then one small chart per measure (they never
@@ -1351,3 +1349,22 @@ input[type="time"] {
 /* the console's command line sits flush in its frame, so the frame shows focus */
 .console-in:focus-within { box-shadow: inset 0 0 0 2px var(--accent-text); }
 .console-in input:focus-visible { outline: none !important; }
+
+/* ================================================================ motion
+   The same vocabulary as Shelf and Rack: a page comes in as you go to it, the
+   dialog fades out as it closes (see closeModal in app.js), and hovers and
+   presses ease rather than snap. Nothing at all when the device asks for
+   less motion. */
+@keyframes rise-in { from { opacity: 0; transform: translateY(12px); } }
+@keyframes fade-out { to { opacity: 0; } }
+@keyframes pop-out { to { opacity: 0; transform: scale(0.97); } }
+#view.page-in { animation: rise-in 0.3s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.modal-bg.closing { animation: fade-out 0.14s ease-in forwards; pointer-events: none; }
+.modal-bg.closing > .modal { animation: pop-out 0.14s ease-in forwards; }
+.toast { transition: opacity 0.3s ease, transform 0.3s ease; }
+.srv-mini:active, .nav-item:active, .btn:not(:disabled):active { transform: scale(0.98); }
+.srv-mini, .nav-item { transition: background-color 0.15s ease, color 0.15s ease, transform 0.12s ease; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}

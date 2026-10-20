@@ -179,7 +179,29 @@ function modal(html, { wide = false } = {}) {
   paintRanges(root);
   return root;
 }
-function closeModal() { runModalCleanup(); $("#modal-root").innerHTML = ""; }
+// The dialog fades out rather than vanishing (unless the device asks for
+// less motion). Only that dialog goes: one opened meanwhile stays.
+function closeModal() {
+  runModalCleanup();
+  const bg = $(".modal-bg", $("#modal-root"));
+  if (!bg || lessMotion()) { $("#modal-root").innerHTML = ""; return; }
+  if (bg.classList.contains("closing")) return;
+  bg.classList.add("closing");
+  bg.inert = true;
+  setTimeout(() => bg.remove(), 140);
+}
+
+const lessMotion = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+// Restarts the entrance animation `cls` on node (see "motion" in style.css).
+function playIn(node, cls = "page-in") {
+  if (!node || lessMotion()) return;
+  clearTimeout(node.playTimer);
+  node.classList.remove(cls);
+  void node.offsetWidth; // so re-adding the class starts the animation over
+  node.classList.add(cls);
+  node.playTimer = setTimeout(() => node.classList.remove(cls), 400);
+}
 
 /* ------------------------------------------------------------- build badge */
 /*
@@ -289,14 +311,14 @@ function applyTheme(theme) {
   try { localStorage.setItem("theme", theme); } catch {}
   $("#nav-theme-label").textContent = `Theme: ${theme}`;
   const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.content = theme === "light" ? "#e7e9f0" : "#282a31";
+  if (meta) meta.content = theme === "light" ? "#dfe2e9" : "#202228";
 }
 
 /* ---------------------------------------------------------------- bootstrap */
 async function boot() {
   // The shell in index.html carries data-ico placeholders; fill them before
   // anything else so the sidebar never flashes empty boxes.
-  $("#brand-mark").innerHTML = ico("cube");
+  $("#brand-mark").innerHTML = '<img src="/icon.svg" alt="" />';
   hydrateIcons();
   applyTheme(document.documentElement.dataset.theme === "light" ? "light" : "dark");
   $("#nav-theme").onclick = () =>
@@ -425,6 +447,7 @@ async function handleGlobalEvent(e) {
 /* -------------------------------------------------------------------- router */
 function route() {
   const h = location.hash.replace(/^#/, "") || "/";
+  const from = state.route ? state.route.name + "/" + state.route.id : "";
   closeConsoleStream();
   if (h.startsWith("/server/")) {
     state.route = { name: "server", id: h.slice(8) };
@@ -434,6 +457,8 @@ function route() {
     renderDashboard();
   }
   renderSidebar();
+  // A new page comes in; a re-render of the same one doesn't.
+  if (from && from !== state.route.name + "/" + state.route.id) playIn(view);
 }
 function go(hash) { location.hash = hash; }
 
