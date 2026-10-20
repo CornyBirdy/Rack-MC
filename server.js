@@ -24,6 +24,7 @@ const playerlog = require("./lib/playerlog");
 const backup = require("./lib/backup");
 const voicechat = require("./lib/voicechat");
 const uptime = require("./lib/uptime");
+const duplicate = require("./lib/duplicate");
 
 // Port precedence: explicit flag, then the launcher's MC_PORT (our portEnv),
 // then whatever Rack/the old controller assigned, then the standalone default.
@@ -474,8 +475,9 @@ const server = http.createServer(async (req, res) => {
         return sendJSON(res, 200, { server: manager.summary(id) });
       }
       if (!action && req.method === "DELETE") {
-        if (manager.slot(id).backup)
-          return sendJSON(res, 400, { error: "Wait for the running backup or restore to finish." });
+        const job = manager.slot(id).backup;
+        if (job)
+          return sendJSON(res, 400, { error: job.kind === "copy" ? "Wait for the copy of this server to finish." : "Wait for the running backup or restore to finish." });
         const out = manager.destroy(id);
         try { backup.forget(id); } catch (e) { console.error("[hoster] could not remove backups:", e.message); }
         return sendJSON(res, 200, out);
@@ -489,6 +491,19 @@ const server = http.createServer(async (req, res) => {
         return guard(async () => sendJSON(res, 200, await manager.restart(id)))(req, res);
       if (action === "cancel-restart" && req.method === "POST")
         return sendJSON(res, 200, manager.cancelRestart(id));
+
+      // ---- duplicate ----
+      // GET  /api/servers/:id/duplicate — what there is to copy, and how big
+      // POST /api/servers/:id/duplicate {name, port, world, content, config, players}
+      // The copy shows up as a new server installing, with progress on its console.
+      if (action === "duplicate" && req.method === "GET")
+        return guard(async () => sendJSON(res, 200, await duplicate.plan(id)))(req, res);
+      if (action === "duplicate" && req.method === "POST")
+        return guard(async () => {
+          const body = await readJSONBody(req);
+          const copy = duplicate.duplicate(id, body);
+          sendJSON(res, 200, { server: manager.summary(copy.id) });
+        })(req, res);
 
       if (action === "command" && req.method === "POST") {
         const body = await readJSONBody(req);
