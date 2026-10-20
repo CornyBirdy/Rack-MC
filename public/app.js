@@ -311,7 +311,7 @@ function applyTheme(theme) {
   try { localStorage.setItem("theme", theme); } catch {}
   $("#nav-theme-label").textContent = `Theme: ${theme}`;
   const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.content = theme === "light" ? "#dfe2e9" : "#202228";
+  if (meta) meta.content = theme === "light" ? "#eef1f7" : "#1b1c1f";
 }
 
 /* ---------------------------------------------------------------- bootstrap */
