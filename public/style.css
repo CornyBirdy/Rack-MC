@@ -1,35 +1,35 @@
 /* ============================================================= MC Hoster UI */
 /* ---------------------------------------------------------------- theme tokens
-   Rack Suite "Twilight" palette (v2: deeper, less pastel dark; a calmer light). Dark is the primary theme; light is the
-   secondary one. Every colour in this file comes from these tokens. */
+   Rack Suite design system: the suite's shared blue/grey neutrals and status colours, with MC Hoster's
+   green accent. Dark is the primary theme; light is the secondary one. Every colour in this file comes from these tokens. */
 /* A console keeps the dark tokens in both themes, head and input line included. */
 :root,
 [data-theme="dark"],
 .console {
   color-scheme: dark;
-  --ground: #1b1d23;
-  --surface-sunken: #202228;
-  --surface: #262830;
-  --surface-raised: #2f323b;
-  --surface-track: #3b3e48;
-  --hairline: #363943;
-  --border-control: #8b90a0;
-  --ink: #eceef4;
-  --ink-muted: #a9adbb;
-  --accent: #1fb8b1;
-  --on-accent: #001c1b;
-  --accent-text: #3fd0c8;
-  --accent-soft: rgba(31, 184, 177, 0.16);
-  --accent-2: #7d8cf5;
-  --accent-3: #f0915a;
-  --success: #34c48b;
-  --success-soft: rgba(52, 196, 139, 0.15);
-  --warning: #f2b33d;
-  --warning-soft: rgba(242, 179, 61, 0.15);
-  --danger: #f25f73;
-  --danger-soft: rgba(242, 95, 115, 0.15);
-  --info: #4fa3f7;
-  --info-soft: rgba(79, 163, 247, 0.15);
+  --ground: #202124;
+  --surface-sunken: #1b1c1f;
+  --surface: #292a2d;
+  --surface-raised: #303134;
+  --surface-track: #3c4043;
+  --hairline: #3c4043;
+  --border-control: #9aa0a6;
+  --ink: #e8eaed;
+  --ink-muted: #a9aeb4;
+  --accent: #81c995;
+  --on-accent: #0b2a14;
+  --accent-text: #a8dab5;
+  --accent-soft: rgba(129, 201, 149, 0.14);
+  --accent-2: #8ab4f8;
+  --accent-3: #fdd663;
+  --success: #81c995;
+  --success-soft: rgba(129, 201, 149, 0.14);
+  --warning: #fdd663;
+  --warning-soft: rgba(253, 214, 99, 0.14);
+  --danger: #f28b82;
+  --danger-soft: rgba(242, 139, 130, 0.14);
+  --info: #8ab4f8;
+  --info-soft: rgba(138, 180, 248, 0.14);
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
   --shadow-overlay: 0 12px 32px -16px rgba(0, 0, 0, 0.8);
   --scrim: rgba(0, 0, 0, 0.55);
@@ -37,29 +37,29 @@
 
 [data-theme="light"] {
   color-scheme: light;
-  --ground: #e6e8ee;
-  --surface-sunken: #dfe2e9;
-  --surface: #f0f1f5;
-  --surface-raised: #e8eaf0;
-  --surface-track: #d4d7df;
-  --hairline: #d2d5dd;
-  --border-control: #8d919e;
-  --ink: #2c2f38;
-  --ink-muted: #626674;
-  --accent: #22a9a3;
-  --on-accent: #002321;
-  --accent-text: #0b726d;
-  --accent-soft: rgba(34, 169, 163, 0.15);
-  --accent-2: #5160cc;
-  --accent-3: #b5652f;
-  --success: #1d7f5c;
-  --success-soft: rgba(29, 127, 92, 0.11);
-  --warning: #8c6510;
-  --warning-soft: rgba(140, 101, 16, 0.11);
-  --danger: #c0435a;
-  --danger-soft: rgba(192, 67, 90, 0.11);
-  --info: #2f6fbf;
-  --info-soft: rgba(47, 111, 191, 0.11);
+  --ground: #f6f8fc;
+  --surface-sunken: #eef1f7;
+  --surface: #ffffff;
+  --surface-raised: #f1f4f9;
+  --surface-track: #e1e5ec;
+  --hairline: #e1e4ea;
+  --border-control: #7a8088;
+  --ink: #1f2329;
+  --ink-muted: #5f6368;
+  --accent: #188038;
+  --on-accent: #ffffff;
+  --accent-text: #0f6b2f;
+  --accent-soft: rgba(24, 128, 56, 0.16);
+  --accent-2: #1a73e8;
+  --accent-3: #b06000;
+  --success: #137333;
+  --success-soft: rgba(19, 115, 51, 0.1);
+  --warning: #8f5800;
+  --warning-soft: rgba(143, 88, 0, 0.1);
+  --danger: #c5221f;
+  --danger-soft: rgba(197, 34, 31, 0.1);
+  --info: #1967d2;
+  --info-soft: rgba(25, 103, 210, 0.1);
   --shadow: 0 1px 2px rgba(30, 34, 44, 0.08), 0 1px 3px rgba(30, 34, 44, 0.06);
   --shadow-overlay: 0 12px 32px -12px rgba(30, 34, 44, 0.22);
   --scrim: rgba(44, 47, 56, 0.35);
@@ -91,8 +91,8 @@
   --font: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
   --font-mono: "Cascadia Mono", Consolas, monospace;
 
-  /* the faint ring that stands in for a button outline */
-  --ring-soft: inset 0 0 0 1px color-mix(in srgb, var(--ink) 9%, transparent);
+  /* the hairline that stands in for a button outline */
+  --ring-soft: inset 0 0 0 1px var(--hairline);
 
   --control-h: 32px;
   --sidebar-w: 264px;
@@ -188,7 +188,7 @@ a { color: inherit; text-decoration: none; }
 
 /* -------------------------------------------------------------------- buttons */
 /* Soft buttons: no hard outlines. A plain .btn is secondary - a raised fill
-   with a faint ring; primary is solid teal, danger a tint, ghost bare. */
+   with a hairline; primary is the solid accent, danger a tint, ghost bare. */
 .btn {
   font-family: inherit; font-size: 13px; font-weight: 550; border-radius: var(--radius-control); letter-spacing: 0;
   min-height: var(--control-h); padding: 4px 16px; border: 1px solid transparent; background: var(--surface-raised); color: var(--ink);
@@ -603,7 +603,7 @@ select { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmln
   display: block; height: 100%; width: 0; border-radius: var(--radius-badge);
   background: var(--accent); transition: width 0.45s ease, background 0.3s;
 }
-/* series alternate teal and periwinkle: CPU teal, memory periwinkle, disk teal */
+/* series alternate the accent and accent-2: CPU accent, memory accent-2, disk accent */
 #sm-mem .mbar > i, #sc-mem .mbar > i { background: var(--accent-2); }
 #sm-disk .mbar > i, #sc-disk .mbar > i { background: var(--accent); }
 .meter.warn .mbar > i, .sys-meter.warn .mbar > i { background: var(--warning) !important; }
@@ -1213,7 +1213,7 @@ select { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmln
 .fm-usage-row .v, .fm-usage-row .p { text-align: right; color: var(--ink-muted); font-size: 11.5px; }
 .fm-usage-row .p { color: var(--ink-muted); }
 .fm-usage-row .sw { width: 8px; height: 8px; border-radius: var(--radius-badge); flex-shrink: 0; }
-/* Six steps of one teal, strongest for the biggest entry — sizes, not identities. */
+/* Six steps of the accent, strongest for the biggest entry — sizes, not identities. */
 .u0 { background: var(--accent); }
 .u1 { background: color-mix(in srgb, var(--accent) 84%, var(--surface-track)); }
 .u2 { background: color-mix(in srgb, var(--accent) 68%, var(--surface-track)); }
@@ -1344,7 +1344,7 @@ input[type="time"] {
 .sched-close { display: flex; align-items: center; gap: 8px; }
 .sched-close select { flex: 1; min-width: 0; }
 
-/* One focus ring everywhere, keyboard or not: 2px of teal text colour, 2px out. */
+/* One focus ring everywhere, keyboard or not: 2px of the accent text colour, 2px out. */
 :focus-visible { outline: 2px solid var(--accent-text) !important; outline-offset: 2px !important; }
 /* the console's command line sits flush in its frame, so the frame shows focus */
 .console-in:focus-within { box-shadow: inset 0 0 0 2px var(--accent-text); }

@@ -10,6 +10,14 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- **The Rack Suite design system.** MC Hoster, Rack and Shelf now share one
+  set of blue/grey neutrals, shapes and soft buttons; each app has its own
+  accent, and MC Hoster's is green (primary buttons, the selected server,
+  switches, meters and focus). Memory charts are blue. Success, warning,
+  danger and info are the same colours in every app. Secondary buttons have
+  a hairline border. Dark and light both follow the new palette.
+- **A new icon:** a duotone green cube on the suite's dark tile, in the tab,
+  the home-screen icon and the sidebar.
 - **Twilight, refined.** Dark is deeper and less pastel — richer teal for
   what you act on, clearer green, amber, red and blue for statuses — and
   light is calmer, with softer whites and text so it no longer glares.
