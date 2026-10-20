@@ -6,6 +6,19 @@ the day the work landed.
 
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-10-20
+
+### Changed
+
+- **Twilight, refined.** Dark is deeper and less pastel — richer teal for
+  what you act on, clearer green, amber, red and blue for statuses — and
+  light is calmer, with softer whites and text so it no longer glares.
+- **A new icon** in the Rack Suite style shared with Rack, Shelf and Cascade:
+  a teal cube on a dark rounded tile (the tab, home-screen icon and sidebar).
+- **Smoother.** Going to a page brings it in, dialogs fade out as they close
+  instead of vanishing, and buttons and the server list ease on hover and
+  press. Nothing moves if your device asks for less motion.
+
 ## 2026-10-19
 
 ### Changed
