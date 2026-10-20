@@ -8,6 +8,19 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## 2026-10-20
 
+### Added
+
+- **Duplicate a server.** The new copy button beside Start (also in
+  **Settings → Duplicate**) makes a new server from an existing one. You pick
+  what comes along: the **world**, the **mods** (or plugins), the **configs**
+  and the **player lists**. Quick picks cover *Everything*, *World only*,
+  *Mods, fresh world* and *Fresh start*, and each part shows its size. The
+  server software always comes too, so nothing is reinstalled. The copy gets
+  its own name and a free port, and leaves the public address, opening hours
+  and *start with panel* behind. A running server can be copied: its world is
+  saved first and players stay connected. Copying a modded world without its
+  mods shows a warning first.
+
 ### Changed
 
 - **The Rack Suite design system.** MC Hoster, Rack and Shelf now share one

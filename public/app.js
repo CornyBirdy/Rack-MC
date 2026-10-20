@@ -1145,8 +1145,10 @@ function renderActions(s) {
          <button class="btn" data-a="restart">${ico("rotate")} Restart</button>`
       : `<button class="btn btn-green" data-a="start" ${busy ? "disabled" : ""}>${ico("play")} Start</button>`}
     ${running || s.status === "starting" ? `<button class="btn btn-ghost btn-icon" data-a="kill" title="Force kill">${ico("bolt")}</button>` : ""}
+    <button class="btn btn-ghost btn-icon" data-a="duplicate" title="Duplicate this server" aria-label="Duplicate this server"
+      ${["installing", "install-failed"].includes(s.status) ? "disabled" : ""}>${ico("copy")}</button>
   `;
-  $$("[data-a]", box).forEach((b) => (b.onclick = () => serverAction(s.id, b.dataset.a)));
+  $$("[data-a]", box).forEach((b) => (b.onclick = () => (b.dataset.a === "duplicate" ? openDuplicate(s.id) : serverAction(s.id, b.dataset.a))));
 }
 
 function renderEula(s) {
@@ -3755,6 +3757,7 @@ const BK_PHASE = {
   safety: "Backing up the current world first",
   extracting: "Unpacking",
   swapping: "Swapping the world in",
+  copying: "Being copied to a new server",
 };
 const BK_SCOPE = { world: "World", full: "Whole server" };
 
@@ -4426,6 +4429,13 @@ async function renderSettingsTab(id) {
       <div id="st-voice" class="form-row"></div>
 
       <div class="divider"></div>
+      <div class="section-title" style="margin-top:0">Duplicate</div>
+      <div class="banner dup-banner">
+        <div>Make a new server from this one — its world, its ${esc(s.content && s.content.folder !== "datapacks" ? s.content.noun.toLowerCase() : "configs")}, or both. This server isn't changed.</div>
+        <div class="b-actions"><button class="btn" id="st-dup">${ico("copy")} Duplicate…</button></div>
+      </div>
+
+      <div class="divider"></div>
       <div class="section-title" style="color:var(--danger)">Danger zone</div>
       <div class="banner err" style="align-items:center">
         <div>Delete this server and all its files (world, mods, configs). This cannot be undone.</div>
@@ -4460,6 +4470,7 @@ async function renderSettingsTab(id) {
       const fresh = await API.get(`/api/servers/${id}`); state.servers.set(id, fresh.server); renderServer(id);
     } catch (e) { toast(e.message, "err"); }
   };
+  $("#st-dup").onclick = () => openDuplicate(id);
   $("#st-delete").onclick = async () => {
     const pl = state.servers.get(id)?.playit;
     if (!(await confirmDialog("Delete server?",
@@ -4468,6 +4479,113 @@ async function renderSettingsTab(id) {
       "Delete forever"))) return;
     try { await API.del(`/api/servers/${id}`); state.servers.delete(id); toast("Server deleted.", "ok"); go("#/"); }
     catch (e) { toast(e.message, "err"); }
+  };
+}
+
+/* --------------------------------------------------------------- duplicate */
+/* A new server made from this one. The server software always comes along, so
+ * the copy starts without installing anything; the world, mods/plugins,
+ * configs and player lists are each a choice. The backend sizes each part from
+ * the Files tab's measurement and does the copying as the new server's install. */
+const DUP_PRESETS = {
+  all: { label: "Everything", world: true, content: true, config: true, players: true },
+  world: { label: "World only", world: true, content: false, config: true, players: true },
+  content: { label: "Fresh world", world: false, content: true, config: true, players: true },
+  none: { label: "Fresh start", world: false, content: false, config: false, players: false },
+};
+
+async function openDuplicate(id) {
+  const s = state.servers.get(id) || {};
+  modal(`
+    <div class="modal-head"><h2>Duplicate ${esc(s.name)}</h2><button class="modal-close">×</button></div>
+    <div class="modal-body" id="dup-body"><p class="muted"><span class="spinner"></span> Measuring the server folder…</p></div>
+    <div class="modal-foot"><span class="muted" id="dup-total"></span><div style="display:flex;gap:10px">
+      <button class="btn btn-ghost" data-x>Cancel</button>
+      <button class="btn btn-primary" id="dup-go" disabled>${ico("copy")} Duplicate</button>
+    </div></div>`);
+  $(".modal-close").onclick = $("[data-x]").onclick = closeModal;
+  let plan;
+  try { plan = await API.get(`/api/servers/${id}/duplicate`); }
+  catch (e) {
+    const b = $("#dup-body"); if (b) b.innerHTML = `<div class="banner err">${esc(e.message)}</div>`;
+    return;
+  }
+  const body = $("#dup-body");
+  if (!body) return; // closed while measuring
+
+  const noun = plan.content ? plan.content.noun : "Mods";
+  const parts = [
+    { k: "world", title: "World", desc: plan.level
+        ? `<code>${esc(plan.level)}</code> with its Nether and End${plan.datapacks ? ", datapacks included" : ""}`
+        : "No world yet — the copy makes its own on first start", has: plan.has.world },
+    plan.content && { k: "content", title: noun, desc: `everything in <code>${esc(plan.content.folder)}/</code>${plan.content.folder === "plugins" ? ", plugin settings included" : ""}`, has: plan.has.content },
+    { k: "config", title: "Configs", desc: "<code>server.properties</code>, <code>config/</code> and the other settings files", has: plan.has.config },
+    { k: "players", title: "Player lists", desc: "ops, whitelist and bans", has: plan.has.players },
+  ].filter(Boolean);
+  const pick = { ...DUP_PRESETS.all };
+
+  body.innerHTML = `
+    <div class="two-col">
+      <div class="form-row"><label>Name</label><input type="text" id="dup-name" maxlength="64" value="${esc(plan.name)}" /></div>
+      <div class="form-row"><label>Game port</label><input type="number" id="dup-port" min="1" max="65535" value="${plan.port}" /></div>
+    </div>
+    <div class="form-row">
+      <label>What to copy</label>
+      <div class="seg seg-sm" id="dup-presets" style="margin-bottom:10px;flex-wrap:wrap">
+        ${Object.entries(DUP_PRESETS).filter(([k]) => plan.content || k !== "world")
+          .map(([k, p]) => `<button class="seg-btn" data-p="${k}">${esc(k === "content" ? (plan.content ? `${noun}, fresh world` : "Fresh world") : p.label)}</button>`).join("")}
+      </div>
+      <div class="dup-parts">
+        ${parts.map((p) => `
+          <label class="dup-part ${p.has ? "" : "empty"}">
+            <input type="checkbox" data-k="${p.k}" ${p.has ? "" : "disabled"} />
+            <span class="dup-txt"><b>${esc(p.title)}</b><span>${p.has ? p.desc : p.k === "world" ? p.desc : "Nothing here yet"}</span></span>
+            <span class="dup-size">${p.has ? fmtBytes(plan.sizes[p.k]) : "—"}</span>
+          </label>`).join("")}
+        <div class="dup-part always">
+          <span class="dup-tick">${ico("check")}</span>
+          <span class="dup-txt"><b>Server software</b><span>${esc(cap(s.modLoader || s.loader || ""))} for Minecraft ${esc(s.mc || "")} — always copied, so nothing needs installing</span></span>
+          <span class="dup-size">${fmtBytes(plan.sizes.software)}</span>
+        </div>
+      </div>
+      <div class="hint" style="margin-top:8px">Logs, backups, stats and player history stay with the original. So do its public address, opening hours and "start with panel".</div>
+    </div>
+    <div id="dup-warn"></div>`;
+
+  const paint = () => {
+    $$("#dup-body [data-k]").forEach((c) => { if (!c.disabled) c.checked = !!pick[c.dataset.k]; });
+    const on = (k) => { const c = $(`#dup-body [data-k="${k}"]`); return !!c && c.checked; };
+    const preset = Object.entries(DUP_PRESETS).find(([, p]) => parts.every((x) => !x.has || !!p[x.k] === on(x.k)));
+    $$("#dup-presets .seg-btn").forEach((b) => b.classList.toggle("on", !!preset && preset[0] === b.dataset.p));
+    const bytes = plan.sizes.software + parts.reduce((a, p) => a + (on(p.k) ? plan.sizes[p.k] : 0), 0);
+    $("#dup-total").textContent = `About ${fmtBytes(bytes)} to copy`;
+    let warn = "";
+    if (plan.modded && on("world") && plan.has.content && !on("content"))
+      warn += `<div class="banner warn">The world was played with ${esc(noun.toLowerCase())}. Opening it without them deletes their blocks, items and creatures from the copy — for good.</div>`;
+    if (on("world") && plan.running)
+      warn += `<div class="hint">${esc(s.name)} is running, so it saves its world first and pauses autosaving until the copy has it. Players stay connected.</div>`;
+    $("#dup-warn").innerHTML = warn;
+  };
+  $$("#dup-presets .seg-btn").forEach((b) => (b.onclick = () => { Object.assign(pick, DUP_PRESETS[b.dataset.p]); paint(); }));
+  $$("#dup-body [data-k]").forEach((c) => (c.onchange = () => { pick[c.dataset.k] = c.checked; paint(); }));
+  paint();
+
+  const btn = $("#dup-go");
+  btn.disabled = false;
+  btn.onclick = async () => {
+    const opts = {};
+    $$("#dup-body [data-k]").forEach((c) => (opts[c.dataset.k] = c.checked));
+    btn.disabled = true;
+    try {
+      const r = await API.post(`/api/servers/${id}/duplicate`, {
+        ...opts, name: $("#dup-name").value.trim(), port: Number($("#dup-port").value),
+      });
+      state.servers.set(r.server.id, r.server);
+      closeModal();
+      toast(`Copying to ${r.server.name}…`, "ok");
+      state.activeTab = "console"; // the copy's progress is on its console
+      go("#/server/" + r.server.id);
+    } catch (e) { btn.disabled = false; toast(e.message, "err"); }
   };
 }
 
