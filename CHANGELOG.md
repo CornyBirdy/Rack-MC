@@ -19,6 +19,14 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   the TPS readings. All of them now read past the label, and older versions
   work as before.
 
+- **Commands show up in Activity on vanilla, Fabric and NeoForge.** The log
+  only knew Paper's `Steve issued server command: /time set day`. Vanilla
+  never prints the typed command; it prints what the command did, the way ops
+  see it in chat (`[Steve: Set the time to 1000]`). Those lines now count as
+  commands, shown as "Steve used a command: Set the time to 1000". On Paper,
+  where both lines appear, the command is only logged once. RCON and command
+  blocks are left out.
+
 ## 2026-10-20
 
 ### Added

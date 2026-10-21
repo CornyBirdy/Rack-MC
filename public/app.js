@@ -1720,7 +1720,10 @@ function plogEventHTML(e) {
   else if (e.type === "chat") body = `${who}<span class="pe-dim">:</span> ${esc(e.text)}`;
   else if (e.type === "death") body = esc(e.text);
   else if (e.type === "advancement") body = `${who} earned <span class="pe-adv">${esc(e.text)}</span>`;
-  else if (e.type === "command") body = `${who} ran <span class="mono pe-dim">${esc(e.text)}</span>`;
+  else if (e.type === "command")
+    body = meta.result
+      ? `${who} <span class="pe-dim">used a command:</span> ${esc(e.text)}` // vanilla only says what it did
+      : `${who} ran <span class="mono pe-dim">${esc(e.text)}</span>`;
   else body = `<span class="pe-dim">${esc(e.text)}</span>`;
   return `
     <div class="plog-ev ${esc(e.type)}">

@@ -497,8 +497,12 @@ server *and* of the panel.
 It all comes from what the server prints, so it works on vanilla, Paper,
 Purpur and modded alike with nothing to install. Deaths are the one fuzzy
 case — they are matched against the vanilla English death messages, so a
-server running a translation may log fewer of them. The last 20,000 events per
-server are kept; older ones roll off.
+server running a translation may log fewer of them. Commands differ by
+server: Paper and Purpur print the command a player typed (`/time set day`),
+while vanilla and modded servers only print what it did (`Set the time to
+1000`), so that is what the feed shows. Commands with no visible effect, such
+as `/msg` or `/help`, aren't printed by vanilla and won't appear. The last
+20,000 events per server are kept; older ones roll off.
 
 ## Letting idle servers rest
 
