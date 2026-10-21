@@ -6,6 +6,19 @@ the day the work landed.
 
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-10-21
+
+### Fixed
+
+- **Deaths are counted again on Minecraft 26.3.** 26.3 started printing
+  everything the server announces as `System chat: Steve fell from a high
+  place`, and the player log read "System" as the player's name, so no death
+  matched. Advancements were missed the same way. The panel's own console
+  questions were affected too, because their answers now carry the same
+  label: `list`, which keeps the player list right after a panel restart, and
+  the TPS readings. All of them now read past the label, and older versions
+  work as before.
+
 ## 2026-10-20
 
 ### Added
