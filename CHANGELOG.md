@@ -6,6 +6,23 @@ the day the work landed.
 
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-10-22
+
+### Fixed
+
+- **Backups no longer make a paused server look awake.** Any console command
+  — and a backup sends three — flipped the server from ‖ Paused back to
+  running in the panel. Minecraft runs console commands while paused but stays
+  paused, and never says "pausing" again, so the panel showed it running until
+  someone joined and left. Turning automatic backups off didn't bring the
+  Paused state back for the same reason. Commands now leave the paused state
+  alone, and the backup is taken without waking the server.
+- **One automatic backup per pause.** A paused world doesn't change, so once a
+  backup has been made since the server paused, the schedule skips it until
+  someone has been on.
+- **A failing automatic backup no longer retries every minute.** It waits 15
+  minutes before the next try.
+
 ## 2026-10-21
 
 ### Fixed

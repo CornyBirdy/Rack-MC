@@ -500,8 +500,11 @@ case — they are matched against the vanilla English death messages, so a
 server running a translation may log fewer of them. Commands differ by
 server: Paper and Purpur print the command a player typed (`/time set day`),
 while vanilla and modded servers only print what it did (`Set the time to
-1000`), so that is what the feed shows. Commands with no visible effect, such
-as `/msg` or `/help`, aren't printed by vanilla and won't appear. The last
+1000`), so that is what the feed shows. That echo only exists for commands
+that change something — in practice op commands like `/time`, `/gamemode`,
+`/tp` or `/give` — and only while the `logAdminCommands` gamerule is on (it is
+by default). Commands any player can run, such as `/msg`, `/me`, `/help` or
+`/list`, aren't printed by vanilla and won't appear. The last
 20,000 events per server are kept; older ones roll off.
 
 ## Letting idle servers rest
@@ -540,6 +543,11 @@ Nothing ticks while paused — crops, furnaces, redstone, mob spawning and the
 daylight cycle all stop, **including in spawn chunks and force-loaded chunks**.
 Those are the only chunks that ran with nobody online in the first place, so if
 you keep an offline farm there, leave this off.
+
+Automatic backups leave a paused server paused: it still answers the console's
+`save-off` / `save-all flush` while parked, so the backup is taken without
+waking it. Since nothing changes while it's paused, one backup covers the whole
+pause; the next scheduled one waits until somebody has been on again.
 
 ### Deep sleep
 
