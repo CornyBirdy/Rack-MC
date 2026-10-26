@@ -18,11 +18,13 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   written.
 
 - **Restoring an older backup with a damaged Distant Horizons database now
-  works.** Backups already made with the bug above can't be repaired, but the
-  only thing damaged in them is that cache, which Distant Horizons regenerates
-  from the world. The restore leaves it out, notes it in the console, and brings
-  the rest back. Damage to any other file still stops the restore, with the
-  current world untouched.
+  works, and keeps the database when it can.** Backups already made with the bug
+  above can't be repaired, but the only thing off in them is that cache. After
+  extracting, the restore asks SQLite whether the database still opens: if it
+  does, it is kept as it was (a copy cut mid-write usually reads fine); if not,
+  it is left out and Distant Horizons starts a fresh one from the world. Either
+  way the console says which. Damage to any other file still stops the restore,
+  with the current world untouched.
 
 ## 2026-10-21
 
