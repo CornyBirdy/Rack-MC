@@ -10,6 +10,17 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **Distant Horizons' database is now backed up in one piece while the server
+  runs.** A plain copy of a database that is being written is stitched from
+  several moments and SQLite refuses to open it, so a restore had to throw it
+  away and Distant Horizons started over. A backup of a running server now takes
+  each `DistantHorizons.sqlite` through SQLite's own backup first (shown as
+  "Snapshotting Distant Horizons data") and zips that. It needs a Node with
+  `node:sqlite` backup support (22.16 or newer); on an older one, or if the
+  snapshot fails, the file is copied as before and the console says so. The
+  snapshot is a temporary copy next to the backups, so allow room for it. Only
+  running servers need it — a stopped server's files aren't changing.
+
 - **Backups taken while the server runs no longer fail to restore with "CRC
   mismatch".** A file over 64 MB (Distant Horizons' database, typically) was
   read twice — once to work out its checksum, once to copy it — and a running
