@@ -3766,6 +3766,7 @@ const BK_PHASE = {
   starting: "Starting",
   saving: "Saving the world to disk",
   collecting: "Listing files",
+  snapshotting: "Snapshotting Distant Horizons data",
   zipping: "Compressing",
   safety: "Backing up the current world first",
   extracting: "Unpacking",
