@@ -6,6 +6,24 @@ the day the work landed.
 
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-10-26
+
+### Fixed
+
+- **Backups taken while the server runs no longer fail to restore with "CRC
+  mismatch".** A file over 64 MB (Distant Horizons' database, typically) was
+  read twice — once to work out its checksum, once to copy it — and a running
+  server changes it in between, so the zip's checksum described a different file
+  than the one stored. The checksum is now taken from the bytes as they are
+  written.
+
+- **Restoring an older backup with a damaged Distant Horizons database now
+  works.** Backups already made with the bug above can't be repaired, but the
+  only thing damaged in them is that cache, which Distant Horizons regenerates
+  from the world. The restore leaves it out, notes it in the console, and brings
+  the rest back. Damage to any other file still stops the restore, with the
+  current world untouched.
+
 ## 2026-10-21
 
 ### Fixed
