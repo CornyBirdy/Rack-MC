@@ -509,7 +509,7 @@ const server = http.createServer(async (req, res) => {
         }
         if ("lagRestartMins" in body)
           patch.lagRestartMins = Math.min(240, Math.max(1, Math.round(Number(body.lagRestartMins) || 10)));
-        if ("backupEvery" in body) patch.backupEvery = Math.max(0, Math.min(24 * 30, Number(body.backupEvery) || 0));
+        if ("backupEvery" in body) patch.backupEvery = (Number(body.backupEvery) > 0 ? Math.max(5 / 60, Math.min(24 * 30, Number(body.backupEvery))) : 0); // hours, 5 min at the least
         if ("backupKeep" in body) patch.backupKeep = Math.max(1, Math.min(200, Math.round(Number(body.backupKeep)) || 7));
         if ("backupScope" in body) patch.backupScope = backup.SCOPES.includes(body.backupScope) ? body.backupScope : "world";
         let uptimeChanged = false;
