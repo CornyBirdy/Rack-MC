@@ -3894,13 +3894,19 @@ function paintBackupSchedule(id) {
   const box = $("#bk-sched");
   if (!box || !bkData) return;
   const sch = bkData.schedule;
+  // Stored in hours; anything under two hours reads better in minutes.
+  const mins = sch.every && sch.every < 2;
+  const shown = sch.every ? (mins ? Math.round(sch.every * 60) : sch.every) : 6;
   box.innerHTML = `
     <div class="switch-row">
       <label class="switch"><input type="checkbox" id="bk-auto" ${sch.every ? "checked" : ""} /><i></i></label>
       <div class="txt"><b>Back up on a timer</b><span>Only while the server is running — a stopped world isn't changing.</span></div>
       <span class="unit">every</span>
-      <input type="number" id="bk-every" min="1" max="720" value="${sch.every || 6}" style="width:68px" ${sch.every ? "" : "disabled"} />
-      <span class="unit">hours</span>
+      <input type="number" id="bk-every" min="5" max="720" value="${shown}" style="width:68px" ${sch.every ? "" : "disabled"} />
+      <select id="bk-unit" ${sch.every ? "" : "disabled"}>
+        <option value="min" ${mins ? "selected" : ""}>minutes</option>
+        <option value="h" ${mins ? "" : "selected"}>hours</option>
+      </select>
     </div>
     <div class="two-col" style="margin-top:14px">
       <div class="form-row"><label>Keep the newest</label><input type="number" id="bk-keep" min="1" max="200" value="${sch.keep}" />
@@ -3913,11 +3919,13 @@ function paintBackupSchedule(id) {
     </div>
     <button class="btn btn-primary" id="bk-save">Save schedule</button>`;
   const sw = $("#bk-auto");
-  sw.onchange = () => ($("#bk-every").disabled = !sw.checked);
+  sw.onchange = () => ($("#bk-every").disabled = $("#bk-unit").disabled = !sw.checked);
   $("#bk-save").onclick = async () => {
     try {
+      const n = Number($("#bk-every").value) || 6;
+      const hours = $("#bk-unit").value === "min" ? Math.max(5, n) / 60 : n;
       await API.patch(`/api/servers/${id}`, {
-        backupEvery: sw.checked ? Number($("#bk-every").value) || 6 : 0,
+        backupEvery: sw.checked ? hours : 0,
         backupKeep: Number($("#bk-keep").value) || 7,
         backupScope: $("#bk-auto-scope").value,
       });
