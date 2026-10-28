@@ -3900,7 +3900,7 @@ function paintBackupSchedule(id) {
   box.innerHTML = `
     <div class="switch-row">
       <label class="switch"><input type="checkbox" id="bk-auto" ${sch.every ? "checked" : ""} /><i></i></label>
-      <div class="txt"><b>Back up on a timer</b><span>Only while the server is running — a stopped world isn't changing.</span></div>
+      <div class="txt"><b>Back up on a timer</b><span>Only counts time the server is running and awake — a stopped or paused world isn't changing.</span></div>
       <span class="unit">every</span>
       <input type="number" id="bk-every" min="5" max="720" value="${shown}" style="width:68px;flex-shrink:0" ${sch.every ? "" : "disabled"} />
       <select id="bk-unit" style="width:110px;flex-shrink:0" ${sch.every ? "" : "disabled"}>

@@ -6,6 +6,16 @@ the day the work landed.
 
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-10-28
+
+### Changed
+
+- **The backup timer now only counts time the server is awake.** A server
+  paused by "pause when empty" isn't ticking, so a timed backup then just
+  copied the last one. The timer now adds up running, un-paused time and backs
+  up once that reaches the interval; it holds still while the server is paused,
+  stopped or asleep, and starts over after each backup and each boot.
+
 ## 2026-10-26
 
 ### Fixed
