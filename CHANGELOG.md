@@ -6,6 +6,26 @@ the day the work landed.
 
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-10-28
+
+### Added
+
+- **Pause when empty now works on older Minecraft versions.** It used to be
+  1.21.2+ only. On 1.20.3 to 1.21.1 the panel freezes the world itself with
+  `/tick freeze` after the chosen time empty and unfreezes it as a player starts
+  to log in. On Fabric and Quilt 1.14 to 1.20.2 turning the switch on installs
+  the Tick Stasis mod (and turning it off removes it); it pauses at once and
+  loads on the next start. Other loaders before 1.20.3 still can't pause, and
+  the switch says so. The "Paused" badge and the backup timer follow along.
+
+### Changed
+
+- **The backup timer now only counts time the server is awake.** A server
+  paused by "pause when empty" isn't ticking, so a timed backup then just
+  copied the last one. The timer now adds up running, un-paused time and backs
+  up once that reaches the interval; it holds still while the server is paused,
+  stopped or asleep, and starts over after each backup and each boot.
+
 ## 2026-10-26
 
 ### Fixed

@@ -3900,7 +3900,7 @@ function paintBackupSchedule(id) {
   box.innerHTML = `
     <div class="switch-row">
       <label class="switch"><input type="checkbox" id="bk-auto" ${sch.every ? "checked" : ""} /><i></i></label>
-      <div class="txt"><b>Back up on a timer</b><span>Only while the server is running — a stopped world isn't changing.</span></div>
+      <div class="txt"><b>Back up on a timer</b><span>Only counts time the server is running and awake — a stopped or paused world isn't changing.</span></div>
       <span class="unit">every</span>
       <input type="number" id="bk-every" min="5" max="720" value="${shown}" style="width:68px;flex-shrink:0" ${sch.every ? "" : "disabled"} />
       <select id="bk-unit" style="width:110px;flex-shrink:0" ${sch.every ? "" : "disabled"}>
@@ -4384,9 +4384,13 @@ async function renderSettingsTab(id) {
           <input type="number" id="st-pause-secs" min="10" step="10" value="${pauseSecs}" style="width:72px" ${pauseOn && canPause ? "" : "disabled"} />
           <span class="unit">sec</span>
         </div>
-        <div class="hint">${canPause
-          ? "Seconds of emptiness before pausing. Nothing ticks while paused — crops, furnaces, redstone and the daylight cycle all stop, including in spawn and force-loaded chunks."
-          : `Minecraft ${esc(def.mc)} cannot pause — the setting arrived in 1.21.2.`}</div>
+        <div class="hint">${!canPause
+          ? `Minecraft ${esc(def.mc)} can't pause by itself, and this loader has no pause mod for it. Deep sleep below still works.`
+          : (data.pauseMethod === "freeze"
+            ? `Minecraft ${esc(def.mc)} has no pause setting, so MC Hoster freezes the world with <code>/tick freeze</code> after this many seconds of emptiness and thaws it as someone connects. `
+            : data.pauseMethod === "mod"
+              ? `Minecraft ${esc(def.mc)} has no pause setting, so MC Hoster installs the <b>Tick Stasis</b> mod when you save this on (and removes it when you turn it off). It pauses straight away — the seconds here don't apply — and takes effect on the next start. `
+              : "") + "Seconds of emptiness before pausing. Nothing ticks while paused — crops, furnaces, redstone and the daylight cycle all stop, including in spawn and force-loaded chunks."}</div>
       </div>
       <div class="form-row">
         <label>Deep sleep</label>

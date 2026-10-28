@@ -514,7 +514,7 @@ Two independent switches, both off by default, for a server nobody is on.
 | CPU | ~0% | none — the process is gone |
 | **RAM** | **still reserved** | given back |
 | Getting back in | instant | a full boot |
-| Needs | Minecraft 1.21.2+ | any version |
+| Needs | Minecraft 1.20.3+, or Fabric/Quilt 1.14+ | any version |
 
 Run both and they ladder: the server pauses after seconds, then shuts down
 after minutes. The dashboard, the sidebar dots and the server page all show
@@ -531,10 +531,14 @@ Off by default. Turn it on and the server pauses its tick loop once it has been
 empty for the number of seconds you set — CPU falls to almost nothing while the
 process stays up, so rejoining is instant and the RAM stays reserved.
 
-This drives Minecraft's own `pause-when-empty-seconds`, so it needs **1.21.2 or
-newer**; on older versions the switch is disabled and the key is never written.
-Leaving it off writes `-1` rather than nothing, so a server never silently
-inherits Minecraft's built-in 60-second default.
+How it pauses depends on the Minecraft version:
+
+| Version | How |
+|---|---|
+| **1.21.2+** | Minecraft's own `pause-when-empty-seconds`. Leaving the switch off writes `-1` rather than nothing, so a server never silently inherits the built-in 60-second default. |
+| **1.20.3 – 1.21.1**, any loader | The panel runs `/tick freeze` once the server has been empty for the chosen seconds, and `/tick unfreeze` the moment a player starts logging in. A freeze you started by hand is never undone for you. |
+| **Fabric / Quilt 1.14 – 1.20.2** | Saving the switch on installs the [Tick Stasis](https://modrinth.com/mod/tick-stasis) mod into `mods/`; turning it off removes it. It pauses straight away (the seconds don't apply) and needs a restart to load. A copy you added yourself is left alone. |
+| Anything else (Vanilla, Paper or Forge before 1.20.3) | No pause is possible; the switch is disabled. Deep sleep still works. |
 
 Nothing ticks while paused — crops, furnaces, redstone, mob spawning and the
 daylight cycle all stop, **including in spawn chunks and force-loaded chunks**.

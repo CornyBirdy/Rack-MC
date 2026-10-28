@@ -489,7 +489,8 @@ const server = http.createServer(async (req, res) => {
         return sendJSON(res, 200, {
           server: manager.summary(id),
           def,
-          pauseSupported: manager.supportsPause(def.mc),
+          pauseSupported: manager.pauseMethod(def) !== null,
+          pauseMethod: manager.pauseMethod(def),
           voice: voicechat.info(def, { deep: true }),
           schedule: { ...uptime.normalize(def.uptime), zone: uptime.zone(), now: Date.now() },
           installLog: s.install.log,
