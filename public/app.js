@@ -4384,9 +4384,13 @@ async function renderSettingsTab(id) {
           <input type="number" id="st-pause-secs" min="10" step="10" value="${pauseSecs}" style="width:72px" ${pauseOn && canPause ? "" : "disabled"} />
           <span class="unit">sec</span>
         </div>
-        <div class="hint">${canPause
-          ? "Seconds of emptiness before pausing. Nothing ticks while paused — crops, furnaces, redstone and the daylight cycle all stop, including in spawn and force-loaded chunks."
-          : `Minecraft ${esc(def.mc)} cannot pause — the setting arrived in 1.21.2.`}</div>
+        <div class="hint">${!canPause
+          ? `Minecraft ${esc(def.mc)} can't pause by itself, and this loader has no pause mod for it. Deep sleep below still works.`
+          : (data.pauseMethod === "freeze"
+            ? `Minecraft ${esc(def.mc)} has no pause setting, so MC Hoster freezes the world with <code>/tick freeze</code> after this many seconds of emptiness and thaws it as someone connects. `
+            : data.pauseMethod === "mod"
+              ? `Minecraft ${esc(def.mc)} has no pause setting, so MC Hoster installs the <b>Tick Stasis</b> mod when you save this on (and removes it when you turn it off). It pauses straight away — the seconds here don't apply — and takes effect on the next start. `
+              : "") + "Seconds of emptiness before pausing. Nothing ticks while paused — crops, furnaces, redstone and the daylight cycle all stop, including in spawn and force-loaded chunks."}</div>
       </div>
       <div class="form-row">
         <label>Deep sleep</label>
