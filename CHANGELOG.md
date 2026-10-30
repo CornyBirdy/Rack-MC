@@ -10,6 +10,14 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **"Start with panel" survives a PC reboot.** When Windows shut down it closed
+  the Minecraft server a moment before the panel, and the panel took that clean
+  exit for a stop someone asked for and forgot the server was meant to be up. An
+  exit nobody asked for now waits a few seconds before it counts, and `stop`
+  typed in the console counts at once. A server that fails to start with the
+  panel (Java or the port not ready right after boot) is tried again up to
+  three times, 15 seconds apart.
+
 - **Backups no longer make a paused server look awake.** Any console command
   — and a backup sends three — flipped the server from ‖ Paused back to
   running in the panel. Minecraft runs console commands while paused but stays
@@ -19,6 +27,11 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   alone, and the backup is taken without waking the server.
 - **A failing automatic backup no longer retries every minute.** It waits 15
   minutes before the next try.
+
+### Changed
+
+- **The force-kill button is a circled cross** instead of a lightning bolt,
+  which looked like a run-on-start switch.
 
 ## 2026-10-28
 
