@@ -1154,7 +1154,7 @@ function renderActions(s) {
       ? `<button class="btn btn-red" data-a="stop">${ico("stop")} Stop</button>
          <button class="btn" data-a="restart">${ico("rotate")} Restart</button>`
       : `<button class="btn btn-green" data-a="start" ${busy ? "disabled" : ""}>${ico("play")} Start</button>`}
-    ${running || s.status === "starting" ? `<button class="btn btn-ghost btn-icon" data-a="kill" title="Force kill">${ico("bolt")}</button>` : ""}
+    ${running || s.status === "starting" ? `<button class="btn btn-ghost btn-icon" data-a="kill" title="Force kill (hard-stops without saving)" aria-label="Force kill">${ico("kill")}</button>` : ""}
     <button class="btn btn-ghost btn-icon" data-a="duplicate" title="Duplicate this server" aria-label="Duplicate this server"
       ${["installing", "install-failed"].includes(s.status) ? "disabled" : ""}>${ico("copy")}</button>
   `;

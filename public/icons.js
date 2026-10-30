@@ -24,7 +24,8 @@ const ICON_PATHS = {
 
   play: "M4.9 3.3 12.3 8l-7.4 4.7z",
   stop: "M4.4 4.4h7.2v7.2H4.4z",
-  bolt: "M8.9 1.8 3.5 9.1h4l-.4 5.1 5.4-7.4H8.4z",
+  // A circled cross: "kill it now". A lightning bolt read as a power / run-on-start switch.
+  kill: "M8 14.2A6.2 6.2 0 1 0 8 1.8a6.2 6.2 0 0 0 0 12.4z M5.7 5.7l4.6 4.6 M10.3 5.7l-4.6 4.6",
 
   folder: "M2.2 4.3c0-.6.5-1.1 1.1-1.1h2.6l1.4 1.7h5.4c.6 0 1.1.5 1.1 1.1v6c0 .6-.5 1.1-1.1 1.1H3.3c-.6 0-1.1-.5-1.1-1.1z",
   file: "M9 1.9H4.7c-.6 0-1.1.5-1.1 1.1v10c0 .6.5 1.1 1.1 1.1h6.6c.6 0 1.1-.5 1.1-1.1V5.4z M9 1.9v3.5h3.5",
@@ -62,7 +63,7 @@ const ICON_PATHS = {
 };
 
 // A handful read better filled than stroked.
-const ICON_FILLED = new Set(["play", "stop", "bolt", "moon"]);
+const ICON_FILLED = new Set(["play", "stop", "moon"]);
 
 /**
  * Inline icon. `name` must exist in ICON_PATHS - an unknown name renders
