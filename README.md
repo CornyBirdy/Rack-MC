@@ -664,6 +664,45 @@ and `fs.statfs()` on the data drive every ~30s. No `wmic`, no PowerShell, no
 child processes, so watching the meters costs a running server nothing. Samples
 ride the SSE stream the panel already keeps open; there is no polling.
 
+## Claude / MCP server
+
+The panel is also an **MCP server**, so Claude (or any MCP client) can look after
+your Minecraft servers for you: *"is the survival server up?", "restart it, then
+tell me when it's running", "who was on last night?", "run `whitelist add Steve`",
+"back it up before I change the mods"*. It needs nothing extra: it's part of the
+panel, at `/mcp` on the panel's own port.
+
+```
+claude mcp add --transport http mc-hoster http://localhost:8100/mcp
+```
+
+(Use the panel's address from another computer, e.g. `http://192.168.1.20:8100/mcp`
+or its Tailscale address.) In Claude's apps, add it as a custom connector with that
+URL. The tools it gets:
+
+| Tool | What it does |
+|---|---|
+| `list_servers`, `get_server` | Every server with status, version, loader, port, who's online; one server in detail |
+| `start_server`, `stop_server`, `restart_server` | Lifecycle (stop is graceful; `force` kills a hung server) |
+| `send_command` | Type a command into a running server's console |
+| `get_console` | The latest console lines |
+| `list_players` | Who's online and who's been on: last seen, playtime, sessions |
+| `server_performance`, `host_stats` | TPS / memory / CPU of a server, and the PC's load |
+| `list_backups`, `create_backup` | See backups, start one |
+
+A server is named by its id or its name (a unique start of the name works). It
+deliberately can't delete servers or backups, restore a backup or edit files:
+those stay in the panel.
+
+**Security.** The panel has no login and is meant for your own network, and so is
+this: anyone who can reach the panel can use `/mcp`. To require a key, set
+`MC_MCP_TOKEN` before starting the panel (in Rack: the app's environment; or
+`set MC_MCP_TOKEN=...` in `run.bat`), and clients must send
+`Authorization: Bearer <token>`
+(`claude mcp add --transport http mc-hoster <url> --header "Authorization: Bearer <token>"`).
+Requests from a web page on another site are always refused. Don't forward the
+panel's port to the internet: use Tailscale or similar.
+
 ## Where things live
 
 ```

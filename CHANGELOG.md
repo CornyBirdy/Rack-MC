@@ -6,6 +6,17 @@ the day the work landed.
 
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-11-04
+
+### Added
+
+- **MCP server.** The panel now speaks MCP at `/mcp`, so Claude (or any MCP
+  client) can list your servers, start / stop / restart them, read their
+  console, run console commands, see who's online, check TPS and the PC's load,
+  and take or list backups. No extra process or dependency; set `MC_MCP_TOKEN` to
+  require a bearer token. Deleting, restoring and file edits are left to the
+  panel. See "Claude / MCP server" in the README.
+
 ## 2026-10-30
 
 ### Fixed
