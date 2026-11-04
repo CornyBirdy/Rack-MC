@@ -726,6 +726,7 @@ MC_hoster/
 │  ├─ perf.js           per-server TPS / CPU / memory / lag stats + history
 │  ├─ playerlog.js      durable per-server player history (sessions, chat…)
 │  ├─ sysmon.js         host CPU / RAM / disk sampling for the meters
+│  ├─ mcp.js            the MCP server at /mcp: Claude can run and watch servers
 │  └─ store.js          persistence
 ├─ public/              the panel UI (index.html / style.css / app.js)
 ├─ data/                created at runtime — git-ignored, never travels
