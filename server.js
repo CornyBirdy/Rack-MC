@@ -26,6 +26,7 @@ const voicechat = require("./lib/voicechat");
 const uptime = require("./lib/uptime");
 const duplicate = require("./lib/duplicate");
 const transfer = require("./lib/transfer");
+const mcp = require("./lib/mcp");
 
 // Port precedence: explicit flag, then the launcher's MC_PORT (our portEnv),
 // then whatever Rack/the old controller assigned, then the standalone default.
@@ -225,6 +226,9 @@ const server = http.createServer(async (req, res) => {
   const p = url.pathname;
   const parts = p.split("/").filter(Boolean);
   const q = url.searchParams;
+
+  // ---- MCP: Claude and other assistants can run the servers (lib/mcp.js) ----
+  if (p === "/mcp") return mcp.handle(req, res).catch((e) => sendJSON(res, 500, { error: e.message || String(e) }));
 
   // ---- Server-sent event channels ----
   if (p === "/api/events") return attachGlobalStream(res);
