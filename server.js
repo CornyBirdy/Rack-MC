@@ -734,6 +734,15 @@ const server = http.createServer(async (req, res) => {
           sendJSON(res, 200, modrinth.remove(store.dirFor(id), def, q.get("file")))
         )(req, res);
 
+      // POST /api/servers/:id/content/toggle {file, enabled}
+      // Adds / removes the .disabled extension on the jar.
+      if (action === "content" && parts[4] === "toggle" && req.method === "POST")
+        return guard(async () => {
+          const body = await readJSONBody(req);
+          const out = modrinth.setEnabled(store.dirFor(id), def, body.file, !!body.enabled);
+          sendJSON(res, 200, { ...out, running: manager.slot(id).status === "running" });
+        })(req, res);
+
       if (action === "content" && parts[4] === "updates" && req.method === "GET")
         return guard(async () =>
           sendJSON(res, 200, { updates: await modrinth.updates(store.dirFor(id), def) })

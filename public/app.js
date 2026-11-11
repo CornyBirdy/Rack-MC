@@ -2721,6 +2721,12 @@ function compatOf(hit, id) {
   return why.join(" · ");
 }
 
+// On/off switch for one installed file (renames it to/from .jar.disabled).
+function toggleHTML(it) {
+  return `<label class="md-switch" title="${it.disabled ? "Disabled — click to enable" : "Enabled — click to disable"}">
+    <input type="checkbox" data-toggle="${esc(it.file)}" ${it.disabled ? "" : "checked"} /><i></i></label>`;
+}
+
 async function loadInstalled(id) {
   const box = $("#md-installed");
   if (!box) return;
@@ -2762,20 +2768,22 @@ function paintInstalled(id) {
     : "";
 
   const rows = items.map((it) => `
-    <div class="file-row md-item" data-slug="${esc(it.slug || "")}">
+    <div class="file-row md-item${it.disabled ? " md-off" : ""}" data-slug="${esc(it.slug || "")}">
       <span class="fic">${it.icon ? `<img class="md-ic" src="${esc(it.icon)}" alt="" loading="lazy" />` : ico("layers")}</span>
       <span class="fname">
         <a href="https://modrinth.com/project/${esc(it.slug)}" target="_blank" rel="noopener">${esc(it.title)}</a>
-        <span class="muted">${esc(it.versionNumber || it.file.split("/").pop())}${it.fromPack ? " · from the modpack" : it.dependency ? " · dependency" : it.adopted ? " · added by hand" : ""} · ${fmtBytes(it.size)}</span>
+        <span class="muted">${esc(it.versionNumber || it.file.split("/").pop())}${it.fromPack ? " · from the modpack" : it.dependency ? " · dependency" : it.adopted ? " · added by hand" : ""} · ${fmtBytes(it.size)}${it.disabled ? " · disabled" : ""}</span>
       </span>
+      ${toggleHTML(it)}
       <span class="md-upd-slot" data-project="${esc(it.projectId)}">${updateButtonHTML(state.mdUpdates && state.mdUpdates.get(it.projectId))}</span>
       <span class="fdel" data-del="${esc(it.file)}" title="Remove">${ico("trash")}</span>
     </div>`).join("");
 
   const loose = unmanaged.map((u) => `
-    <div class="file-row">
+    <div class="file-row${u.disabled ? " md-off" : ""}">
       <span class="fic">${ico("file")}</span>
-      <span class="fname">${esc(u.name)} <span class="muted">added by hand${u.notOnModrinth ? " · not on Modrinth" : ""} · ${fmtBytes(u.size)}</span></span>
+      <span class="fname">${esc(u.name)} <span class="muted">added by hand${u.notOnModrinth ? " · not on Modrinth" : ""} · ${fmtBytes(u.size)}${u.disabled ? " · disabled" : ""}</span></span>
+      ${toggleHTML(u)}
       <span class="fdel" data-del="${esc(u.file)}" title="Remove">${ico("trash")}</span>
     </div>`).join("");
 
@@ -2788,6 +2796,14 @@ function paintInstalled(id) {
   bindModrinthLinks(box);
   $$(".md-upd-slot [data-up]", box).forEach((b) => (b.onclick = (ev) =>
     installContent(id, { versionId: b.dataset.up }, ev.currentTarget)));
+  $$("[data-toggle]", box).forEach((el) => (el.onchange = async () => {
+    el.disabled = true;
+    try {
+      const out = await API.post(`/api/servers/${id}/content/toggle`, { file: el.dataset.toggle, enabled: el.checked });
+      toast(`${el.checked ? "Enabled" : "Disabled"}.${out.running ? " Restart to apply." : ""}`, "ok");
+    } catch (e) { toast(e.message, "err"); }
+    loadInstalled(id);
+  }));
   $$("[data-del]", box).forEach((el) => (el.onclick = async () => {
     const file = el.dataset.del;
     if (!(await confirmDialog("Remove?",
