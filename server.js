@@ -50,6 +50,8 @@ const MIME = {
   ".ico": "image/x-icon",
   ".png": "image/png",
   ".webmanifest": "application/manifest+json",
+  ".woff2": "font/woff2",
+  ".txt": "text/plain; charset=utf-8",
 };
 
 // Addresses another device on the network (a phone, say) can open the panel

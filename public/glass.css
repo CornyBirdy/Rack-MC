@@ -1,0 +1,32 @@
+/* Rack Glass layer: ground, frosted sidebar / cards / stat tiles, pill buttons. Colours, radii and blur come from tokens.css. */
+body { background: var(--ground-base); }
+body::before { content: ""; position: fixed; inset: 0; z-index: -1; background: var(--ground-mesh); pointer-events: none; }
+
+.sidebar {
+  background: var(--glass); border-right: 1px solid var(--edge);
+  backdrop-filter: blur(var(--blur)) saturate(1.4); -webkit-backdrop-filter: blur(var(--blur)) saturate(1.4);
+}
+.topbar {
+  background: var(--float); border-bottom: 1px solid var(--hair);
+  backdrop-filter: blur(var(--blur)) saturate(1.4); -webkit-backdrop-filter: blur(var(--blur)) saturate(1.4);
+}
+.card, .stat-tile {
+  background: var(--card); border-color: var(--edge); border-radius: var(--r-lg); box-shadow: var(--shadow-card);
+  backdrop-filter: blur(var(--blur)) saturate(1.4); -webkit-backdrop-filter: blur(var(--blur)) saturate(1.4);
+}
+.srv-card:hover { background: var(--card); border-color: var(--accent); }
+.nav-item, .srv-mini { border-radius: var(--r-sm); }
+
+/* buttons are pills; the one main action uses the accent gradient */
+.btn { border-radius: var(--r-pill); background: var(--field); }
+.btn:hover { background: var(--card); }
+.btn-primary, .btn-green { background: var(--accent-fill); box-shadow: var(--glow); }
+.btn-primary:hover, .btn-green:hover { background: var(--accent-fill); filter: brightness(1.07); }
+.btn-red, .btn-ghost { box-shadow: none; }
+.btn-red:hover, .btn-ghost:hover { background: color-mix(in srgb, var(--danger) 22%, transparent); }
+.btn-ghost:hover { background: var(--field); }
+
+/* dialogs are never see-through */
+.modal-bg { backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+.modal { background: var(--solid); border-color: var(--edge); border-radius: var(--r-xl); box-shadow: var(--shadow-pop); }
+.console { background: var(--console-ground); }

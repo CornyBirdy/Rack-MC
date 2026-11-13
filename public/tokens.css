@@ -1,0 +1,270 @@
+/* Rack Glass tokens. Every colour, radius, space and type size the app uses comes from here.
+   Theme: dark by default, light when the OS asks for it, or when <html data-theme="light|dark"> forces one.
+   Look: soft colour ground, frosted window and cards, big round shapes, one accent used as a gentle gradient on filled
+   controls only. Settings chosen by the owner: glass 100%, background gradient 50%, button gradient 15%, no solid blocks. */
+
+@font-face { font-family: "Plus Jakarta Sans"; font-style: normal; font-weight: 200 800; font-display: swap;
+  src: url("fonts/plus-jakarta-sans-latin-wght-normal.woff2") format("woff2"); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: "Plus Jakarta Sans"; font-style: normal; font-weight: 200 800; font-display: swap;
+  src: url("fonts/plus-jakarta-sans-latin-ext-wght-normal.woff2") format("woff2"); unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF; }
+@font-face { font-family: "JetBrains Mono"; font-style: normal; font-weight: 400; font-display: swap;
+  src: url("fonts/jetbrains-mono-latin-400-normal.woff2") format("woff2"); }
+@font-face { font-family: "JetBrains Mono"; font-style: normal; font-weight: 500; font-display: swap;
+  src: url("fonts/jetbrains-mono-latin-500-normal.woff2") format("woff2"); }
+
+/* ---- identity: the only per-app value (accent hue) */
+:root { --h: 150; }
+
+/* ---- shape, space, type, motion (same in both themes) */
+:root {
+  --r-xs: 6px;
+  --r-sm: 12px;
+  --r-md: 18px;
+  --r-lg: 26px;
+  --r-xl: 36px;
+  --r-pill: 999px;
+
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 20px;
+  --s-6: 24px;
+  --s-7: 32px;
+  --s-8: 48px;
+
+  --control-h: 36px;
+
+  --font: "Plus Jakarta Sans", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --mono: "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
+
+  --blur: 22px;
+  --dur-1: 120ms; /* hover, press, colour changes */
+  --dur-2: 200ms; /* things appearing: views, sections, notes */
+  --dur-3: 260ms; /* sheets and rows moving */
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+@media (pointer: coarse) {
+  :root { --control-h: 44px; }
+}
+
+/* ---- dark (default) */
+:root {
+  color-scheme: dark;
+  --ground-base: oklch(0.15 0.035 var(--h));
+  --ground-1: oklch(0.235 0.065 var(--h));
+  --ground-2: oklch(0.205 0.06 calc(var(--h) + 30));
+  --ground-3: oklch(0.205 0.06 calc(var(--h) - 25));
+  --ink: oklch(0.96 0.03 var(--h));
+  --ink-muted: oklch(0.76 0.03 var(--h));
+  --hair: oklch(0.96 0.03 var(--h) / 0.1);
+  --glass: oklch(0.24 0.02 var(--h) / 0.5);   /* the window / big panels */
+  --card: oklch(0.24 0.015 var(--h) / 0.62);  /* cards and panels */
+  --field: oklch(0.24 0.02 var(--h) / 0.4);   /* inputs, secondary buttons, raised bits */
+  --float: oklch(0.2 0.02 var(--h) / 0.72);   /* bars that float over content */
+  --solid: oklch(0.22 0.025 var(--h));        /* menus, dialogs, sheets: never see-through */
+  --sunken: oklch(0.12 0.03 var(--h) / 0.45);
+  --edge: oklch(1 0 0 / 0.12);
+  --a: oklch(0.78 0.14 var(--h));
+  --a-2: oklch(0.795 0.14 calc(var(--h) + 8));
+  --on-a: oklch(0.2 0.03 270);
+  --accent-text-c: oklch(0.86 0.1 var(--h));
+  --shadow-c: oklch(0 0 0 / 0.5);
+  --good: oklch(0.74 0.15 150); --good-ink: oklch(0.84 0.14 150);
+  --warn: oklch(0.8 0.14 80);   --warn-ink: oklch(0.86 0.12 80);
+  --bad: oklch(0.7 0.19 25);    --bad-ink: oklch(0.82 0.13 25);
+  --info-ink: oklch(0.8 0.12 258);
+  --red: oklch(0.7 0.19 25);    --blue: oklch(0.7 0.16 258);
+  --track: oklch(0.96 0.03 var(--h) / 0.14);
+  --border-ctl: oklch(0.7 0.03 var(--h));
+}
+
+/* ---- light */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+    --ground-base: oklch(0.95 0.035 var(--h));
+    --ground-1: oklch(0.915 0.05 var(--h));
+    --ground-2: oklch(0.895 0.055 calc(var(--h) + 30));
+    --ground-3: oklch(0.895 0.055 calc(var(--h) - 25));
+    --ink: oklch(0.22 0.03 var(--h));
+    --ink-muted: oklch(0.46 0.03 var(--h));
+    --hair: oklch(0.22 0.03 var(--h) / 0.1);
+    --glass: oklch(1 0.02 var(--h) / 0.58);
+    --card: oklch(1 0.015 var(--h) / 0.78);
+    --field: oklch(1 0.02 var(--h) / 0.5);
+    --float: oklch(1 0.02 var(--h) / 0.72);
+    --solid: oklch(0.995 0.008 var(--h));
+    --sunken: oklch(0.22 0.03 var(--h) / 0.06);
+    --edge: oklch(1 0 0 / 0.85);
+    --a: oklch(0.5 0.17 var(--h));
+    --a-2: oklch(0.5 0.17 calc(var(--h) + 8));
+    --on-a: oklch(1 0 0);
+    --accent-text-c: oklch(0.42 0.17 var(--h));
+    --shadow-c: oklch(0.3 0.08 265 / 0.16);
+    --good: oklch(0.6 0.15 150);  --good-ink: oklch(0.4 0.12 150);
+    --warn: oklch(0.72 0.15 75);  --warn-ink: oklch(0.44 0.1 70);
+    --bad: oklch(0.6 0.2 25);     --bad-ink: oklch(0.46 0.17 25);
+    --info-ink: oklch(0.48 0.17 258);
+    --red: oklch(0.58 0.21 25);   --blue: oklch(0.52 0.2 258);
+    --track: oklch(0.22 0.03 var(--h) / 0.12);
+    --border-ctl: oklch(0.5 0.03 var(--h));
+  }
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+  --ground-base: oklch(0.95 0.035 var(--h));
+  --ground-1: oklch(0.915 0.05 var(--h));
+  --ground-2: oklch(0.895 0.055 calc(var(--h) + 30));
+  --ground-3: oklch(0.895 0.055 calc(var(--h) - 25));
+  --ink: oklch(0.22 0.03 var(--h));
+  --ink-muted: oklch(0.46 0.03 var(--h));
+  --hair: oklch(0.22 0.03 var(--h) / 0.1);
+  --glass: oklch(1 0.02 var(--h) / 0.58);
+  --card: oklch(1 0.015 var(--h) / 0.78);
+  --field: oklch(1 0.02 var(--h) / 0.5);
+  --float: oklch(1 0.02 var(--h) / 0.72);
+  --solid: oklch(0.995 0.008 var(--h));
+  --sunken: oklch(0.22 0.03 var(--h) / 0.06);
+  --edge: oklch(1 0 0 / 0.85);
+  --a: oklch(0.5 0.17 var(--h));
+  --a-2: oklch(0.5 0.17 calc(var(--h) + 8));
+  --on-a: oklch(1 0 0);
+  --accent-text-c: oklch(0.42 0.17 var(--h));
+  --shadow-c: oklch(0.3 0.08 265 / 0.16);
+  --good: oklch(0.6 0.15 150);  --good-ink: oklch(0.4 0.12 150);
+  --warn: oklch(0.72 0.15 75);  --warn-ink: oklch(0.44 0.1 70);
+  --bad: oklch(0.6 0.2 25);     --bad-ink: oklch(0.46 0.17 25);
+  --info-ink: oklch(0.48 0.17 258);
+  --red: oklch(0.58 0.21 25);   --blue: oklch(0.52 0.2 258);
+  --track: oklch(0.22 0.03 var(--h) / 0.12);
+  --border-ctl: oklch(0.5 0.03 var(--h));
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ground-base: oklch(0.15 0.035 var(--h));
+  --ground-1: oklch(0.235 0.065 var(--h));
+  --ground-2: oklch(0.205 0.06 calc(var(--h) + 30));
+  --ground-3: oklch(0.205 0.06 calc(var(--h) - 25));
+  --ink: oklch(0.96 0.03 var(--h));
+  --ink-muted: oklch(0.76 0.03 var(--h));
+  --hair: oklch(0.96 0.03 var(--h) / 0.1);
+  --glass: oklch(0.24 0.02 var(--h) / 0.5);
+  --card: oklch(0.24 0.015 var(--h) / 0.62);
+  --field: oklch(0.24 0.02 var(--h) / 0.4);
+  --float: oklch(0.2 0.02 var(--h) / 0.72);
+  --solid: oklch(0.22 0.025 var(--h));
+  --sunken: oklch(0.12 0.03 var(--h) / 0.45);
+  --edge: oklch(1 0 0 / 0.12);
+  --a: oklch(0.78 0.14 var(--h));
+  --a-2: oklch(0.795 0.14 calc(var(--h) + 8));
+  --on-a: oklch(0.2 0.03 270);
+  --accent-text-c: oklch(0.86 0.1 var(--h));
+  --shadow-c: oklch(0 0 0 / 0.5);
+  --good: oklch(0.74 0.15 150); --good-ink: oklch(0.84 0.14 150);
+  --warn: oklch(0.8 0.14 80);   --warn-ink: oklch(0.86 0.12 80);
+  --bad: oklch(0.7 0.19 25);    --bad-ink: oklch(0.82 0.13 25);
+  --info-ink: oklch(0.8 0.12 258);
+  --red: oklch(0.7 0.19 25);    --blue: oklch(0.7 0.16 258);
+  --track: oklch(0.96 0.03 var(--h) / 0.14);
+  --border-ctl: oklch(0.7 0.03 var(--h));
+}
+
+/* ---- derived (same in both themes) */
+:root {
+  --ground-mesh:
+    radial-gradient(60% 70% at 8% 0%, var(--ground-1) 0%, transparent 70%),
+    radial-gradient(55% 60% at 100% 20%, var(--ground-2) 0%, transparent 70%),
+    radial-gradient(60% 60% at 60% 110%, var(--ground-3) 0%, transparent 70%),
+    var(--ground-base);
+  --accent-fill: linear-gradient(135deg, var(--a), var(--a-2));
+  --a-soft: color-mix(in oklch, var(--a) 16%, transparent);
+  --glow: 0 10px 24px -10px color-mix(in oklch, var(--a) 15%, transparent);
+  --glow-lg: 0 16px 36px -16px color-mix(in oklch, var(--a) 15%, transparent);
+  --shadow-window: 0 18px 50px -14px var(--shadow-c), 0 2px 6px -2px var(--shadow-c);
+  --shadow-card: 0 6px 24px -12px var(--shadow-c);
+  --shadow-pop: 0 18px 44px -12px var(--shadow-c), 0 2px 8px -2px var(--shadow-c);
+}
+
+/* ---- the Rack Suite names the app's CSS already uses, now backed by the glass tokens */
+:root {
+  --ground: var(--ground-base);
+  --surface: var(--card);
+  --surface-raised: var(--field);
+  --surface-sunken: var(--sunken);
+  --surface-track: var(--track);
+  --hairline: var(--hair);
+  --border-control: var(--border-ctl);
+  --accent: var(--a);
+  --on-accent: var(--on-a);
+  --accent-text: var(--accent-text-c);
+  --accent-soft: var(--a-soft);
+  --success: var(--good-ink);
+  --warning: var(--warn-ink);
+  --danger: var(--bad-ink);
+  --info: var(--info-ink);
+  --success-soft: color-mix(in oklch, var(--good) 20%, transparent);
+  --warning-soft: color-mix(in oklch, var(--warn) 24%, transparent);
+  --danger-soft: color-mix(in oklch, var(--bad) 18%, transparent);
+  --info-soft: color-mix(in oklch, var(--info-ink) 18%, transparent);
+  --soft-a: 18%;
+  --tint-hover: 8%;
+  --tint-press: 14%;
+}
+
+/* ---- people who ask for less transparency, or browsers without blur, get solid surfaces */
+@media (prefers-reduced-transparency: reduce) {
+  :root { --blur: 0px; --glass: var(--solid); --card: var(--solid); --field: var(--solid); --float: var(--solid); }
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  :root { --glass: var(--solid); --card: var(--solid); --field: var(--solid); --float: var(--solid); }
+}
+
+/* ---- MC Hoster: secondary accents, and the names its own CSS uses, now backed by the glass tokens */
+:root { --accent-2: #8ab4f8; --accent-3: #fdd663; }
+@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) { --accent-2: #1a73e8; --accent-3: #b06000; } }
+:root[data-theme="light"] { --accent-2: #1a73e8; --accent-3: #b06000; }
+:root {
+  --shadow: var(--shadow-card);
+  --shadow-overlay: var(--shadow-pop);
+  --scrim: oklch(0.1 0.03 var(--h) / 0.55);
+  --radius-badge: var(--r-xs);
+  --radius-control: var(--r-sm);
+  --radius-card: var(--r-lg);
+  --radius-overlay: var(--r-xl);
+  --radius-pill: var(--r-pill);
+  --font-mono: var(--mono);
+  --space-1: var(--s-1); --space-2: var(--s-2); --space-3: var(--s-3); --space-4: var(--s-4);
+  --space-5: var(--s-5); --space-6: var(--s-6); --space-7: var(--s-7); --space-8: var(--s-8);
+}
+
+/* ---- a console keeps the dark tokens in both themes, head and input line included */
+.console {
+  color-scheme: dark;
+  --ground-base: oklch(0.15 0.035 var(--h));
+  --ground-1: oklch(0.235 0.065 var(--h));
+  --ground-2: oklch(0.205 0.06 calc(var(--h) + 30));
+  --ground-3: oklch(0.205 0.06 calc(var(--h) - 25));
+  --ink: oklch(0.96 0.03 var(--h));
+  --ink-muted: oklch(0.76 0.03 var(--h));
+  --hair: oklch(0.96 0.03 var(--h) / 0.1);
+  --glass: oklch(0.24 0.02 var(--h) / 0.5);
+  --card: oklch(0.24 0.015 var(--h) / 0.62);
+  --field: oklch(0.24 0.02 var(--h) / 0.4);
+  --float: oklch(0.2 0.02 var(--h) / 0.72);
+  --solid: oklch(0.22 0.025 var(--h));
+  --sunken: oklch(0.12 0.03 var(--h) / 0.45);
+  --edge: oklch(1 0 0 / 0.12);
+  --a: oklch(0.78 0.14 var(--h));
+  --a-2: oklch(0.795 0.14 calc(var(--h) + 8));
+  --on-a: oklch(0.2 0.03 270);
+  --accent-text-c: oklch(0.86 0.1 var(--h));
+  --shadow-c: oklch(0 0 0 / 0.5);
+  --good: oklch(0.74 0.15 150); --good-ink: oklch(0.84 0.14 150);
+  --warn: oklch(0.8 0.14 80);   --warn-ink: oklch(0.86 0.12 80);
+  --bad: oklch(0.7 0.19 25);    --bad-ink: oklch(0.82 0.13 25);
+  --info-ink: oklch(0.8 0.12 258);
+  --red: oklch(0.7 0.19 25);    --blue: oklch(0.7 0.16 258);
+  --track: oklch(0.96 0.03 var(--h) / 0.14);
+  --border-ctl: oklch(0.7 0.03 var(--h));
+}
