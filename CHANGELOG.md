@@ -8,6 +8,8 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## 2026-11-13
 
+### Changed
+
 - **New look: Rack Glass.** The panel now sits on a soft green colour background with a frosted sidebar, cards and
   stat tiles, much rounder corners and pill-shaped buttons. The main buttons use a very light green gradient. Text is
   now Plus Jakarta Sans (consoles and addresses stay in a code font), and both fonts ship with the panel so it needs no
