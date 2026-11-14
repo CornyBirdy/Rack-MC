@@ -6,6 +6,15 @@ the day the work landed.
 
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-11-14
+
+### Changed
+
+- **MC Hoster looks different.** The Dashboard now opens on a big "Servers online" number with a chip for each running
+  server and its player count. On a server's page, **Players** is now the large tile, the other numbers are big and
+  light, and the tabs are a row of buttons with a raised selected one instead of an underline. Corners are softer
+  everywhere: cards are less round, buttons are rounded rectangles instead of pills. Everything works the same as before.
+
 ## 2026-11-13
 
 ### Changed

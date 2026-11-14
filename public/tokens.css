@@ -17,11 +17,12 @@
 
 /* ---- shape, space, type, motion (same in both themes) */
 :root {
-  --r-xs: 6px;
-  --r-sm: 12px;
-  --r-md: 18px;
-  --r-lg: 26px;
-  --r-xl: 36px;
+  --r-xs: 3px;
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-xl: 20px;
+  --r-btn: 10px;
   --r-pill: 999px;
 
   --s-1: 4px;

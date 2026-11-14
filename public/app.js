@@ -673,6 +673,10 @@ function allocHTML() {
 function renderDashboard() {
   const servers = [...state.servers.values()].sort((a, b) => a.name.localeCompare(b.name));
   const online = servers.filter((s) => s.status === "running").length;
+  const playersNow = servers.reduce((n, s) => n + ((s.players || []).length), 0);
+  const heroHTML = `<section class="card dash-hero" aria-label="Servers online"><span class="label">Servers online</span>
+        <div class="hero-big"><b>${online}</b><small>of ${servers.length}</small></div>
+        <div class="hero-chips">${servers.filter((s) => s.status === "running").map((s) => `<span class="hero-chip ok"><span class="dot"></span>${esc(s.name)} · ${(s.players || []).length}/${s.maxPlayers}</span>`).join("") || `<span class="hero-chip">Nothing is running</span>`}${playersNow ? `<span class="hero-chip">${playersNow} player${playersNow === 1 ? "" : "s"} online</span>` : ""}</div></section>`;
 
   view.innerHTML = `
     <div class="page">
@@ -686,6 +690,7 @@ function renderDashboard() {
           <button class="btn btn-primary" id="dash-create"><span class="ic">＋</span> Create Server</button>
         </div>
       </div>
+      ${servers.length ? heroHTML : ""}
       ${sysCardHTML()}
       ${servers.length ? `<div class="grid">${servers.map(cardHTML).join("")}</div>` : emptyHTML()}
     </div>`;
