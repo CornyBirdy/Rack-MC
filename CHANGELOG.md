@@ -10,6 +10,7 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- **Smoother, more specific animations.** Opening a server slides the page in from the right and going back to the Dashboard slides it in from the left. A server's tabs slide the way you are going (to a tab on the right from the right, to one on the left from the left). Cards and stat tiles arrive one after another, the "Servers online" number counts up, new console lines slide in, and server cards lift when you hover and press when you tap. Everything is off if your device asks for reduced motion.
 - **MC Hoster looks different.** The Dashboard now opens on a big "Servers online" number with a chip for each running
   server and its player count. On a server's page, **Players** is now the large tile, the other numbers are big and
   light, and the tabs are a row of buttons with a raised selected one instead of an underline. Corners are softer

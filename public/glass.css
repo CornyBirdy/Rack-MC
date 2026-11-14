@@ -61,3 +61,30 @@ body::before { content: ""; position: fixed; inset: 0; z-index: -1; background: 
 .tab { padding: 8px 14px; border-radius: var(--r-sm); border-bottom: 0; margin: 0; white-space: nowrap; }
 .tab.active { background: var(--card); color: var(--ink); border-bottom: 0; box-shadow: 0 4px 14px -6px var(--shadow-c); }
 @media (min-width: 1100px) { .statbar { grid-template-columns: repeat(7, minmax(0, 1fr)); } }
+
+/* ================= Motion: pages and tabs slide the way you are going ================= */
+:root { --spring: cubic-bezier(0.34, 1.4, 0.64, 1); }
+@keyframes pgFwd { from { opacity: 0; transform: translateX(32px); } }
+@keyframes pgBack { from { opacity: 0; transform: translateX(-32px); } }
+@keyframes tabFwd { from { opacity: 0; transform: translateX(22px); } }
+@keyframes tabBack { from { opacity: 0; transform: translateX(-22px); } }
+@keyframes cardIn { from { opacity: 0; transform: translateY(14px); } }
+@keyframes lineIn { from { opacity: 0; transform: translateY(6px); } }
+@keyframes chipPop { from { opacity: 0; transform: scale(.7); } }
+#view.page-fwd { animation: pgFwd .36s var(--ease); }
+#view.page-back { animation: pgBack .36s var(--ease); }
+#tab-body.tab-fwd { animation: tabFwd .3s var(--ease); }
+#tab-body.tab-back { animation: tabBack .3s var(--ease); }
+#view.page-fwd .stat-tile, #view.page-back .stat-tile, #view.page-fwd .srv-card, #view.page-back .srv-card, #view.page-back .dash-hero, #view.page-fwd .dash-hero, #view.page-back .card, #view.page-fwd .card { animation: cardIn .45s var(--ease) both; }
+.statbar .stat-tile:nth-child(2) { animation-delay: 40ms; } .statbar .stat-tile:nth-child(3) { animation-delay: 80ms; } .statbar .stat-tile:nth-child(4) { animation-delay: 120ms; } .statbar .stat-tile:nth-child(5) { animation-delay: 160ms; } .statbar .stat-tile:nth-child(6) { animation-delay: 200ms; }
+.grid .srv-card:nth-child(2) { animation-delay: 70ms; } .grid .srv-card:nth-child(3) { animation-delay: 140ms; } .grid .srv-card:nth-child(n+4) { animation-delay: 200ms; }
+.hero-chip { animation: chipPop .35s var(--spring) both; }
+.console-out > :last-child { animation: lineIn .28s var(--ease); }
+.btn { transition: background .13s, transform .15s var(--spring), box-shadow .2s; }
+.btn:not(:disabled):active { transform: scale(.95); }
+.srv-card { transition: border-color .14s, background .14s, transform .2s var(--spring), box-shadow .2s; }
+.srv-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-window); }
+.srv-card:active { transform: scale(.985); }
+.tab { transition: background .2s, color .2s, transform .15s var(--spring); } .tab:active { transform: scale(.95); }
+.modal-bg > .modal { animation: pop .38s var(--spring); }
+@media (prefers-reduced-motion: reduce) { #view.page-fwd, #view.page-back, #tab-body.tab-fwd, #tab-body.tab-back, #view [class*="stat-tile"], #view .srv-card, #view .card, .hero-chip, .console-out > :last-child { animation: none !important; } .srv-card:hover { transform: none; } }

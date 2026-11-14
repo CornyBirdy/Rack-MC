@@ -194,13 +194,20 @@ function closeModal() {
 const lessMotion = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 // Restarts the entrance animation `cls` on node (see "motion" in style.css).
+// Numbers count up to their value instead of jumping.
+function countAnim(el, from, to) {
+  if (!el || from === to || lessMotion()) return;
+  const t0 = performance.now(), dur = 600;
+  const step = (t) => { const p = Math.min(1, (t - t0) / dur); el.textContent = Math.round(from + (to - from) * (1 - Math.pow(1 - p, 3))); if (p < 1) requestAnimationFrame(step); };
+  el.textContent = from; requestAnimationFrame(step);
+}
 function playIn(node, cls = "page-in") {
   if (!node || lessMotion()) return;
   clearTimeout(node.playTimer);
   node.classList.remove(cls);
   void node.offsetWidth; // so re-adding the class starts the animation over
   node.classList.add(cls);
-  node.playTimer = setTimeout(() => node.classList.remove(cls), 400);
+  node.playTimer = setTimeout(() => node.classList.remove(cls), 600);
 }
 
 /* ------------------------------------------------------------- build badge */
@@ -453,6 +460,7 @@ function route() {
   const h = location.hash.replace(/^#/, "") || "/";
   const from = state.route ? state.route.name + "/" + state.route.id : "";
   closeConsoleStream();
+  if (!h.startsWith("/server/") && from !== "dashboard/null") state.heroOnline = null; // arriving on the dashboard: count up from zero
   if (h.startsWith("/server/")) {
     state.route = { name: "server", id: h.slice(8) };
     renderServer(h.slice(8));
@@ -461,8 +469,8 @@ function route() {
     renderDashboard();
   }
   renderSidebar();
-  // A new page comes in; a re-render of the same one doesn't.
-  if (from && from !== state.route.name + "/" + state.route.id) playIn(view);
+  // A new page comes in; a re-render of the same one doesn't. Into a server from the right, back to the dashboard from the left.
+  if (from && from !== state.route.name + "/" + state.route.id) { playIn(view, state.route.name === "server" ? "page-fwd" : "page-back"); }
 }
 function go(hash) { location.hash = hash; }
 
@@ -670,6 +678,12 @@ function allocHTML() {
 }
 
 /* ---------------------------------------------------------------- dashboard */
+function heroCount() {
+  const hb = document.querySelector(".dash-hero .hero-big b"); if (!hb) return;
+  const to = Number(hb.textContent), prev = state.heroOnline;
+  state.heroOnline = to;
+  if (prev == null) countAnim(hb, 0, to); else if (prev !== to) countAnim(hb, prev, to);
+}
 function renderDashboard() {
   const servers = [...state.servers.values()].sort((a, b) => a.name.localeCompare(b.name));
   const online = servers.filter((s) => s.status === "running").length;
@@ -695,6 +709,7 @@ function renderDashboard() {
       ${servers.length ? `<div class="grid">${servers.map(cardHTML).join("")}</div>` : emptyHTML()}
     </div>`;
 
+  heroCount();
   paintSysmon();
   $("#dash-create").onclick = openCreateWizard;
   $("#dash-import").onclick = openImport;
@@ -1227,6 +1242,7 @@ async function serverAction(id, act) {
 /* ------------------------------------------------------------- tab switching */
 const TABS = ["console", "stats", "players", "content", "files", "backups", "properties", "settings"];
 function selectTab(id, tab) {
+  const prevTab = TABS.indexOf(state.activeTab), nextTab = TABS.indexOf(tab);
   state.activeTab = tab;
   $$("#tabs .tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === tab));
   closeConsoleStream();
@@ -1238,6 +1254,8 @@ function selectTab(id, tab) {
   else if (tab === "backups") renderBackupsTab(id);
   else if (tab === "properties") renderPropertiesTab(id);
   else if (tab === "settings") renderSettingsTab(id);
+  // the tab's content slides the way you're going: to a tab on the right from the right, to one on the left from the left
+  if (prevTab >= 0 && prevTab !== nextTab) playIn($("#tab-body"), nextTab > prevTab ? "tab-fwd" : "tab-back");
 }
 
 /* --------------------------------------------------------------- console tab */
