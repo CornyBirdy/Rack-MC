@@ -34,8 +34,8 @@ body::before { content: ""; position: fixed; inset: 0; z-index: -1; background: 
 /* ================= Redesign: dashboard hero, server stat tiles, tabs ================= */
 .dash-hero {
   position: relative; overflow: hidden; border-radius: var(--r-xl); padding: 22px 26px; margin-bottom: 14px;
-  border-color: color-mix(in oklch, var(--a) 30%, var(--edge));
-  background: radial-gradient(90% 130% at 100% 0%, color-mix(in oklch, var(--a) 26%, transparent), transparent 62%), linear-gradient(150deg, color-mix(in oklch, var(--a) 12%, var(--card)), var(--card));
+  border-color: var(--edge);
+  background: var(--card);
   box-shadow: var(--shadow-window);
 }
 .dash-hero .label { font-size: 12.5px; font-weight: 600; color: var(--ink-muted); text-transform: none; letter-spacing: 0; }
@@ -48,8 +48,8 @@ body::before { content: ""; position: fixed; inset: 0; z-index: -1; background: 
 
 /* server page: Players is the hero tile, the rest are quiet big-number tiles */
 .statbar { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
-.stat-tile:nth-child(4) { order: -1; grid-column: span 2; padding: 18px 22px; border-radius: var(--r-xl); border-color: color-mix(in oklch, var(--a) 30%, var(--edge));
-  background: radial-gradient(90% 130% at 100% 0%, color-mix(in oklch, var(--a) 26%, transparent), transparent 62%), linear-gradient(150deg, color-mix(in oklch, var(--a) 12%, var(--card)), var(--card)); }
+.stat-tile:nth-child(4) { order: -1; grid-column: span 2; padding: 18px 22px; border-radius: var(--r-xl); border-color: var(--edge);
+  background: var(--card); }
 .stat-tile:nth-child(4) .value { font-size: 2.8rem; font-weight: 300; letter-spacing: -0.04em; line-height: 1; }
 .stat-tile .label { text-transform: none; letter-spacing: 0; font-size: 12.5px; font-weight: 500; }
 .stat-tile .value { font-weight: 300; font-size: 1.5rem; letter-spacing: -0.02em; }
@@ -59,7 +59,7 @@ body::before { content: ""; position: fixed; inset: 0; z-index: -1; background: 
 .tabs { display: flex; gap: 4px; padding: 4px; margin: 14px 0 16px; background: var(--float); border: 1px solid var(--hair); border-radius: var(--r-md); overflow-x: auto;
   backdrop-filter: blur(var(--blur)) saturate(1.4); -webkit-backdrop-filter: blur(var(--blur)) saturate(1.4); }
 .tab { padding: 8px 14px; border-radius: var(--r-sm); border-bottom: 0; margin: 0; white-space: nowrap; }
-.tab.active { background: var(--card); color: var(--ink); border-bottom: 0; box-shadow: 0 4px 14px -6px var(--shadow-c); }
+.tab.active { background: var(--card); color: var(--ink); border-bottom: 0; box-shadow: 0 0 0 1px var(--hair); }
 @media (min-width: 1100px) { .statbar { grid-template-columns: repeat(7, minmax(0, 1fr)); } }
 
 /* ================= Motion: pages and tabs slide the way you are going ================= */
@@ -83,8 +83,13 @@ body::before { content: ""; position: fixed; inset: 0; z-index: -1; background: 
 .btn { transition: background .13s, transform .15s var(--spring), box-shadow .2s; }
 .btn:not(:disabled):active { transform: scale(.95); }
 .srv-card { transition: border-color .14s, background .14s, transform .2s var(--spring), box-shadow .2s; }
-.srv-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-window); }
+.srv-card:hover { box-shadow: var(--shadow-window); }
 .srv-card:active { transform: scale(.985); }
 .tab { transition: background .2s, color .2s, transform .15s var(--spring); } .tab:active { transform: scale(.95); }
 .modal-bg > .modal { animation: pop .38s var(--spring); }
 @media (prefers-reduced-motion: reduce) { #view.page-fwd, #view.page-back, #tab-body.tab-fwd, #tab-body.tab-back, #view [class*="stat-tile"], #view .srv-card, #view .card, .hero-chip, .console-out > :last-child { animation: none !important; } .srv-card:hover { transform: none; } }
+
+/* ================= Flat: quiet chrome, one accent, no glass, glows or colour washes (unslop method) ================= */
+:root { --spring: cubic-bezier(0.2, 0.7, 0.2, 1); } /* one easing curve: nothing overshoots */
+*, *::before, *::after { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+.srv-card:hover { transform: none; border-color: var(--border-ctl); }
