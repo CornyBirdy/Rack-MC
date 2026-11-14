@@ -3,6 +3,10 @@
    Look (flat): quiet tinted-neutral surfaces in steps with hairlines, one accent for the main action and the selection,
    no glass, glows, colour washes or overshoot. Tuned with the unslop method (see README credits). */
 
+@font-face { font-family: "Inter Variable"; font-style: normal; font-weight: 100 900; font-display: swap;
+  src: url("fonts/inter-latin-wght-normal.woff2") format("woff2"); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: "Inter Variable"; font-style: normal; font-weight: 100 900; font-display: swap;
+  src: url("fonts/inter-latin-ext-wght-normal.woff2") format("woff2"); unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF; }
 @font-face { font-family: "Plus Jakarta Sans"; font-style: normal; font-weight: 200 800; font-display: swap;
   src: url("fonts/plus-jakarta-sans-latin-wght-normal.woff2") format("woff2"); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
 @font-face { font-family: "Plus Jakarta Sans"; font-style: normal; font-weight: 200 800; font-display: swap;
@@ -18,11 +22,11 @@
 /* ---- shape, space, type, motion (same in both themes) */
 :root {
   --r-xs: 3px;
-  --r-sm: 6px;
-  --r-md: 10px;
-  --r-lg: 14px;
-  --r-xl: 20px;
-  --r-btn: 10px;
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 20px;
+  --r-xl: 28px;
+  --r-btn: 14px;
   --r-pill: 999px;
 
   --s-1: 4px;
@@ -36,7 +40,7 @@
 
   --control-h: 36px;
 
-  --font: "Plus Jakarta Sans", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --font: "Inter Variable", "Plus Jakarta Sans", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
   --mono: "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
 
   --blur: 0px;
@@ -52,24 +56,24 @@
 /* ---- dark (default) */
 :root {
   color-scheme: dark;
-  --ground-base: oklch(0.16 0.006 var(--h));
+  --ground-base: oklch(0.13 0.004 var(--h));
   --ground-1: oklch(0.235 0.065 var(--h));
   --ground-2: oklch(0.205 0.06 calc(var(--h) + 30));
   --ground-3: oklch(0.205 0.06 calc(var(--h) - 25));
   --ink: oklch(0.96 0.005 var(--h));
   --ink-muted: oklch(0.72 0.012 var(--h));
   --hair: oklch(0.96 0.005 var(--h) / 0.09);
-  --glass: oklch(0.19 0.007 var(--h));   /* the window / big panels */
-  --card: oklch(0.205 0.007 var(--h));  /* cards and panels */
-  --field: oklch(0.235 0.008 var(--h));   /* inputs, secondary buttons, raised bits */
-  --float: oklch(0.225 0.008 var(--h));   /* bars that float over content */
-  --solid: oklch(0.24 0.008 var(--h));        /* menus, dialogs, sheets: never see-through */
-  --sunken: oklch(0.13 0.006 var(--h));
+  --glass: oklch(0.16 0.005 var(--h));   /* the window / big panels */
+  --card: oklch(0.18 0.005 var(--h));  /* cards and panels */
+  --field: oklch(0.215 0.006 var(--h));   /* inputs, secondary buttons, raised bits */
+  --float: oklch(0.2 0.006 var(--h));   /* bars that float over content */
+  --solid: oklch(0.22 0.006 var(--h));        /* menus, dialogs, sheets: never see-through */
+  --sunken: oklch(0.105 0.004 var(--h));
   --edge: oklch(1 0 0 / 0.09);
-  --a: oklch(0.78 0.14 var(--h));
+  --a: oklch(0.85 0.16 var(--h));
   --a-2: oklch(0.795 0.14 calc(var(--h) + 8));
   --on-a: oklch(0.2 0.03 270);
-  --accent-text-c: oklch(0.86 0.1 var(--h));
+  --accent-text-c: oklch(0.88 0.11 var(--h));
   --shadow-c: oklch(0 0 0 / 0.5);
   --good: oklch(0.74 0.15 150); --good-ink: oklch(0.84 0.14 150);
   --warn: oklch(0.8 0.14 80);   --warn-ink: oklch(0.86 0.12 80);
@@ -143,24 +147,24 @@
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --ground-base: oklch(0.16 0.006 var(--h));
+  --ground-base: oklch(0.13 0.004 var(--h));
   --ground-1: oklch(0.235 0.065 var(--h));
   --ground-2: oklch(0.205 0.06 calc(var(--h) + 30));
   --ground-3: oklch(0.205 0.06 calc(var(--h) - 25));
   --ink: oklch(0.96 0.005 var(--h));
   --ink-muted: oklch(0.72 0.012 var(--h));
   --hair: oklch(0.96 0.005 var(--h) / 0.09);
-  --glass: oklch(0.19 0.007 var(--h));
-  --card: oklch(0.205 0.007 var(--h));
-  --field: oklch(0.235 0.008 var(--h));
-  --float: oklch(0.225 0.008 var(--h));
-  --solid: oklch(0.24 0.008 var(--h));
-  --sunken: oklch(0.13 0.006 var(--h));
+  --glass: oklch(0.16 0.005 var(--h));
+  --card: oklch(0.18 0.005 var(--h));
+  --field: oklch(0.215 0.006 var(--h));
+  --float: oklch(0.2 0.006 var(--h));
+  --solid: oklch(0.22 0.006 var(--h));
+  --sunken: oklch(0.105 0.004 var(--h));
   --edge: oklch(1 0 0 / 0.09);
-  --a: oklch(0.78 0.14 var(--h));
+  --a: oklch(0.85 0.16 var(--h));
   --a-2: oklch(0.795 0.14 calc(var(--h) + 8));
   --on-a: oklch(0.2 0.03 270);
-  --accent-text-c: oklch(0.86 0.1 var(--h));
+  --accent-text-c: oklch(0.88 0.11 var(--h));
   --shadow-c: oklch(0 0 0 / 0.5);
   --good: oklch(0.74 0.15 150); --good-ink: oklch(0.84 0.14 150);
   --warn: oklch(0.8 0.14 80);   --warn-ink: oklch(0.86 0.12 80);
@@ -178,8 +182,8 @@
   --a-soft: color-mix(in oklch, var(--a) 16%, transparent);
   --glow: 0 0 0 0 transparent;
   --glow-lg: 0 0 0 0 transparent;
-  --shadow-window: 0 1px 2px -1px var(--shadow-c);
-  --shadow-card: 0 1px 2px -1px var(--shadow-c);
+  --shadow-window: inset 0 1px 0 oklch(1 0 0 / 0.05), 0 1px 2px -1px var(--shadow-c);
+  --shadow-card: inset 0 1px 0 oklch(1 0 0 / 0.045), 0 1px 2px -1px var(--shadow-c);
   --shadow-pop: 0 12px 32px -12px var(--shadow-c), 0 1px 3px -1px var(--shadow-c);
 }
 
@@ -238,24 +242,24 @@
 /* ---- a console keeps the dark tokens in both themes, head and input line included */
 .console {
   color-scheme: dark;
-  --ground-base: oklch(0.16 0.006 var(--h));
+  --ground-base: oklch(0.13 0.004 var(--h));
   --ground-1: oklch(0.235 0.065 var(--h));
   --ground-2: oklch(0.205 0.06 calc(var(--h) + 30));
   --ground-3: oklch(0.205 0.06 calc(var(--h) - 25));
   --ink: oklch(0.96 0.005 var(--h));
   --ink-muted: oklch(0.72 0.012 var(--h));
   --hair: oklch(0.96 0.005 var(--h) / 0.09);
-  --glass: oklch(0.19 0.007 var(--h));
-  --card: oklch(0.205 0.007 var(--h));
-  --field: oklch(0.235 0.008 var(--h));
-  --float: oklch(0.225 0.008 var(--h));
-  --solid: oklch(0.24 0.008 var(--h));
-  --sunken: oklch(0.13 0.006 var(--h));
+  --glass: oklch(0.16 0.005 var(--h));
+  --card: oklch(0.18 0.005 var(--h));
+  --field: oklch(0.215 0.006 var(--h));
+  --float: oklch(0.2 0.006 var(--h));
+  --solid: oklch(0.22 0.006 var(--h));
+  --sunken: oklch(0.105 0.004 var(--h));
   --edge: oklch(1 0 0 / 0.09);
-  --a: oklch(0.78 0.14 var(--h));
+  --a: oklch(0.85 0.16 var(--h));
   --a-2: oklch(0.795 0.14 calc(var(--h) + 8));
   --on-a: oklch(0.2 0.03 270);
-  --accent-text-c: oklch(0.86 0.1 var(--h));
+  --accent-text-c: oklch(0.88 0.11 var(--h));
   --shadow-c: oklch(0 0 0 / 0.5);
   --good: oklch(0.74 0.15 150); --good-ink: oklch(0.84 0.14 150);
   --warn: oklch(0.8 0.14 80);   --warn-ink: oklch(0.86 0.12 80);

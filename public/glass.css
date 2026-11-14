@@ -93,3 +93,19 @@ body::before { content: ""; position: fixed; inset: 0; z-index: -1; background: 
 :root { --spring: cubic-bezier(0.2, 0.7, 0.2, 1); } /* one easing curve: nothing overshoots */
 *, *::before, *::after { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
 .srv-card:hover { transform: none; border-color: var(--border-ctl); }
+
+/* ================= Flatkey look: near-black ground, sheened surfaces with no outlines, light type, pill controls ================= */
+:root { --sheen: linear-gradient(180deg, color-mix(in oklch, var(--ink) 4%, var(--card)), var(--card)); }
+body { font-feature-settings: "tnum" 1, "cv11" 1; }
+.card, .stat-tile, .srv-card, .dash-hero, .console { background: var(--sheen); border-color: transparent; box-shadow: var(--shadow-card); }
+.btn, .sidebar, .topbar { border-color: transparent; }
+input, select, textarea { background: var(--sunken); border-color: transparent; border-radius: var(--r-md); }
+.tabs { border-radius: 28px; background: var(--sunken); border-color: transparent; box-shadow: inset 0 1px 3px oklch(0 0 0 / .28); }
+.tab { border-radius: 999px; }
+.tab.active { background: var(--field); box-shadow: inset 0 1px 0 oklch(1 0 0 / .07), 0 1px 3px oklch(0 0 0 / .35); color: var(--ink); }
+.hero-chip { border-radius: 999px; border-color: transparent; }
+.sidebar, .topbar { border-color: transparent; }
+.tabs { padding: 4px; gap: 2px; width: fit-content; max-width: 100%; border-bottom: 0; }
+.tab.active { border-bottom: 0; }
+.nav-item.active { background: var(--field); }
+.hero-big, .hero-big b { font-weight: 300; }
